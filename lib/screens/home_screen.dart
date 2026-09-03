@@ -246,6 +246,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _showMessage('Created task "${action.title}"');
         _switchToTab(1);
 
+      case VoiceActionType.queryBalance:
+        _showMessage(
+          'Looking up balance for "${action.customerName ?? 'Unknown'}"',
+        );
+        _switchToTab(2);
+
       case VoiceActionType.navigate:
         final tabIndex = _tabIndexFromTarget(action.targetTab);
         _switchToTab(tabIndex);

@@ -100,15 +100,21 @@ class _TaskTile extends StatelessWidget {
               children: [
                 _PriorityChip(priority: task.priority),
                 const SizedBox(width: 8),
-                Text(
-                  'Created ${dateFormat.format(task.createdAt)}',
-                  style: theme.textTheme.bodySmall,
+                Flexible(
+                  child: Text(
+                    'Created ${dateFormat.format(task.createdAt)}',
+                    style: theme.textTheme.bodySmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 if (task.dueAt != null) ...[
                   const SizedBox(width: 8),
-                  Text(
-                    'Due ${dateFormat.format(task.dueAt!)}',
-                    style: theme.textTheme.bodySmall,
+                  Flexible(
+                    child: Text(
+                      'Due ${dateFormat.format(task.dueAt!)}',
+                      style: theme.textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ],

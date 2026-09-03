@@ -96,6 +96,12 @@ class ParsedAction {
   /// Convenience getter for the `target_tab` field (used by navigate actions).
   String? get targetTab => fields['target_tab'] as String?;
 
+  /// Convenience getter for the `direction` field (used by query_balance).
+  ///
+  /// Either "outgoing" (customer owes the shop) or "incoming" (shop owes the
+  /// customer). Defaults to "outgoing" when the backend omits it.
+  String? get direction => fields['direction'] as String?;
+
   /// Returns a copy of this action with one or more fields overridden.
   ParsedAction copyWithField(Map<String, dynamic> overrides) {
     return ParsedAction(
@@ -110,6 +116,7 @@ enum VoiceActionType {
   addInventory,
   addUdhaar,
   addTask,
+  queryBalance,
   navigate,
   unknown;
 
@@ -118,6 +125,7 @@ enum VoiceActionType {
       'add_inventory' => addInventory,
       'add_udhaar' => addUdhaar,
       'add_task' => addTask,
+      'query_balance' => queryBalance,
       'navigate' => navigate,
       _ => unknown,
     };
@@ -128,6 +136,7 @@ enum VoiceActionType {
         addInventory => 'Add Inventory Item',
         addUdhaar => 'Record Udhaar',
         addTask => 'Create Task',
+        queryBalance => 'Look Up Balance',
         navigate => 'Navigate',
         unknown => 'Unrecognized Command',
       };

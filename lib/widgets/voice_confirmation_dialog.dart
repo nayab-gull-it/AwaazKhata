@@ -114,7 +114,11 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
           ElevatedButton(
             onPressed: _confirm,
             child: Text(
-              action.type == VoiceActionType.navigate ? 'Go' : 'Confirm',
+              action.type == VoiceActionType.navigate
+                  ? 'Go'
+                  : action.type == VoiceActionType.queryBalance
+                      ? 'Look Up'
+                      : 'Confirm',
             ),
           ),
       ],
@@ -126,6 +130,7 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
       VoiceActionType.addInventory => _buildInventoryBody(action),
       VoiceActionType.addUdhaar => _buildUdhaarBody(action),
       VoiceActionType.addTask => _buildTaskBody(action),
+      VoiceActionType.queryBalance => _buildQueryBalanceBody(action),
       VoiceActionType.navigate => _buildNavigateBody(action),
       VoiceActionType.unknown => _buildUnknownBody(),
     };
@@ -234,6 +239,27 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
     );
   }
 
+  Widget _buildQueryBalanceBody(ParsedAction action) {
+    final name = action.customerName ?? 'Unknown';
+    final directionLabel =
+        action.direction == 'incoming' ? 'we owe them' : 'they owe us';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Look up balance for $name?',
+          style: const TextStyle(fontSize: 16),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Direction: $directionLabel',
+          style: const TextStyle(fontSize: 13, color: Colors.black54),
+        ),
+      ],
+    );
+  }
+
   Widget _buildUnknownBody() {
     return const Column(
       mainAxisSize: MainAxisSize.min,
@@ -254,6 +280,7 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
       VoiceActionType.addInventory => Icons.inventory_2_outlined,
       VoiceActionType.addUdhaar => Icons.account_balance_wallet_outlined,
       VoiceActionType.addTask => Icons.check_circle_outline,
+      VoiceActionType.queryBalance => Icons.balance_outlined,
       VoiceActionType.navigate => Icons.open_in_new,
       VoiceActionType.unknown => Icons.help_outline,
     };
