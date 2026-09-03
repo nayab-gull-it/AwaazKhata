@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:khata_app/config/app_config.dart';
+import 'package:khata_app/models/inventory_item.dart';
+import 'package:khata_app/models/parsed_action.dart';
+import 'package:khata_app/models/task.dart';
+import 'package:khata_app/models/udhaar_entry.dart';
 import 'package:khata_app/providers/app_state.dart';
 import 'package:khata_app/screens/inventory_screen.dart';
 import 'package:khata_app/screens/tasks_screen.dart';
 import 'package:khata_app/screens/udhaar_screen.dart';
+import 'package:khata_app/services/backend_api_service.dart';
 import 'package:khata_app/services/speech_service.dart';
 import 'package:khata_app/theme/app_theme.dart';
 import 'package:khata_app/widgets/mic_button.dart';
+import 'package:khata_app/widgets/voice_confirmation_dialog.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
@@ -14,7 +20,8 @@ import 'package:provider/provider.dart';
 ///
 /// Shows summary cards at the top, lets the user switch between
 /// inventory, tasks, and udhaar screens, and provides a microphone
-/// button for Urdu voice commands.
+/// button for Urdu voice commands. The full voice pipeline runs here:
+/// speech → backend parsing → confirmation dialog → AppState mutation.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -26,9 +33,11 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   bool _isListening = false;
   bool _speechAvailable = false;
+  bool _isProcessing = false;
   String? _recognizedPreview;
 
   final SpeechService _speechService = SpeechService();
+  final BackendApiService _backendApi = BackendApiService();
 
   final List<Widget> _screens = const [
     InventoryScreen(),
@@ -76,9 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Toggles the microphone listening state.
   ///
-  /// Starts listening when idle and stops listening when active. The
-  /// recognized text is shown in a preview area for verification; it is
-  /// not sent to the backend yet.
+  /// Starts listening when idle and stops listening when active.
   Future<void> _onMicTap() async {
     if (_isListening) {
       await _speechService.stopListening();
@@ -114,29 +121,24 @@ class _HomeScreenState extends State<HomeScreen> {
     await _speechService.startListening(
       onResult: _onSpeechResult,
       localeId: AppConfig.appLocale,
-      // TEMP: extended window to rule out premature cutoff during testing.
-      listenFor: const Duration(seconds: 15),
+      listenFor: const Duration(seconds: 10),
     );
 
     // Safety net: if the plugin never reports a final result, stop the UI
     // listening state after the configured listen duration.
-    // TEMP: 16s to match the extended 15s listen window.
-    await Future<void>.delayed(const Duration(seconds: 16));
+    await Future<void>.delayed(const Duration(seconds: 11));
     if (mounted && _isListening) {
       _setListening(false);
       if (_recognizedPreview == null) {
-        _showMessage('No speech detected');
+        _showMessage('Sorry, please repeat');
       }
     }
   }
 
   /// Handles incoming speech results.
   ///
-  /// Updates the preview text and, when the result is final, stops
-  /// listening and displays the raw text with its confidence score.
-  // TEMP: confidence gate removed for accuracy diagnosis — always show the
-  // raw result so we can see exactly what was detected and how confident
-  // the plugin is. Restore the < 0.5 threshold after testing.
+  /// Updates the preview text and, when the result is final with acceptable
+  /// confidence, sends the transcript to the backend for parsing.
   void _onSpeechResult(SpeechResult result) {
     if (!mounted) return;
 
@@ -147,10 +149,127 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result.isFinal) {
       _setListening(false);
 
-      _showMessage(
-        '"${result.text}" (confidence: ${result.confidence.toStringAsFixed(2)})',
-      );
+      if (result.confidence < 0.5) {
+        _showMessage('Sorry, please repeat');
+        return;
+      }
+
+      _processVoiceCommand(result.text);
     }
+  }
+
+  /// Sends the transcript to the backend, shows a confirmation dialog,
+  /// and applies the confirmed action to AppState.
+  Future<void> _processVoiceCommand(String transcript) async {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+
+    try {
+      final parsedAction = await _backendApi.parseVoiceCommand(transcript);
+
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+
+      final confirmedAction = await VoiceConfirmationDialog.show(
+        context,
+        parsedAction,
+      );
+
+      if (confirmedAction != null && mounted) {
+        _applyAction(confirmedAction);
+      }
+    } on BackendException catch (e) {
+      debugPrint('[HomeScreen] BackendException: $e');
+      if (mounted) {
+        setState(() => _isProcessing = false);
+        _showMessage(e.message);
+      }
+    } catch (e) {
+      debugPrint('[HomeScreen] Unexpected error: $e');
+      if (mounted) {
+        setState(() => _isProcessing = false);
+        _showMessage("Couldn't process that, try again");
+      }
+    }
+  }
+
+  /// Applies a confirmed voice action to the AppState.
+  ///
+  /// Routes to the appropriate tab if the action is a navigation command,
+  /// otherwise adds the parsed entry to the relevant list.
+  void _applyAction(ParsedAction action) {
+    final appState = context.read<AppState>();
+
+    switch (action.type) {
+      case VoiceActionType.addInventory:
+        final id = 'inv-${DateTime.now().millisecondsSinceEpoch}';
+        appState.addInventoryItem(
+          InventoryItem(
+            id: id,
+            name: action.name ?? 'New Item',
+            category: action.category ?? 'General',
+            quantity: action.quantity ?? 1,
+            unit: action.unit ?? 'pcs',
+            purchasePrice: action.purchasePrice ?? 0.0,
+            salePrice: action.salePrice ?? 0.0,
+            createdAt: DateTime.now(),
+          ),
+        );
+        _showMessage('Added "${action.name}" to inventory');
+        _switchToTab(0);
+
+      case VoiceActionType.addUdhaar:
+        final id = 'udh-${DateTime.now().millisecondsSinceEpoch}';
+        appState.addUdhaar(
+          UdhaarEntry(
+            id: id,
+            customerName: action.customerName ?? 'Unknown',
+            phoneNumber: action.phoneNumber ?? '',
+            amount: action.amount ?? 0.0,
+            description: action.description,
+            createdAt: DateTime.now(),
+          ),
+        );
+        _showMessage('Recorded udhaar for "${action.customerName}"');
+        _switchToTab(2);
+
+      case VoiceActionType.addTask:
+        final id = 'task-${DateTime.now().millisecondsSinceEpoch}';
+        appState.addTask(
+          Task(
+            id: id,
+            title: action.title ?? 'New Task',
+            description: action.description,
+            createdAt: DateTime.now(),
+          ),
+        );
+        _showMessage('Created task "${action.title}"');
+        _switchToTab(1);
+
+      case VoiceActionType.navigate:
+        final tabIndex = _tabIndexFromTarget(action.targetTab);
+        _switchToTab(tabIndex);
+
+      case VoiceActionType.unknown:
+        _showMessage("Couldn't understand that command");
+    }
+  }
+
+  /// Switches the bottom navigation to the given tab index (0, 1, or 2).
+  void _switchToTab(int index) {
+    if (index >= 0 && index < _screens.length) {
+      setState(() => _currentIndex = index);
+    }
+  }
+
+  /// Maps a target tab name from the backend to a tab index.
+  int _tabIndexFromTarget(String? target) {
+    return switch (target?.toLowerCase()) {
+      'inventory' => 0,
+      'tasks' => 1,
+      'udhaar' => 2,
+      _ => 0,
+    };
   }
 
   void _setListening(bool listening) {
@@ -191,13 +310,26 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
         actions: [
-          IconButton(
-            onPressed: () {
-              // TODO: Open settings/profile screen.
-            },
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-          ),
+          if (_isProcessing)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.white),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              onPressed: () {
+                // TODO: Open settings/profile screen.
+              },
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Settings',
+            ),
         ],
       ),
       body: Column(
@@ -214,7 +346,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.only(bottom: 8),
         child: MicButton(
           isListening: _isListening,
-          onTap: _onMicTap,
+          onTap: _isProcessing ? null : _onMicTap,
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,

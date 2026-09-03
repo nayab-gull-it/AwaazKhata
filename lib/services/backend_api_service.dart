@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:khata_app/config/app_config.dart';
+import 'package:khata_app/models/parsed_action.dart';
 
 /// Communicates with the AwaazKhata backend.
 ///
@@ -19,64 +22,68 @@ class BackendApiService {
 
   /// Sends a raw voice transcript to the backend for intent parsing.
   ///
-  /// The backend is responsible for interpreting the Urdu command
-  /// and returning a structured action (add inventory, record udhaar, etc.).
-  Future<Map<String, dynamic>> processVoiceCommand(String transcript) async {
-    final uri = Uri.parse('${AppConfig.backendBaseUrl}/voice/command');
-    final response = await _client
-        .post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'transcript': transcript}),
-        )
-        .timeout(AppConfig.backendTimeout);
+  /// Returns a typed [ParsedAction] on success. Throws [BackendException]
+  /// when the backend is unreachable, times out, or returns a non-2xx
+  /// status code.
+  Future<ParsedAction> parseVoiceCommand(String transcript) async {
+    final uri = Uri.parse('${AppConfig.backendBaseUrl}/parse-command');
 
-    return _handleResponse(response);
-  }
+    debugPrint('[BackendApi] POST $uri transcript="$transcript"');
 
-  /// Fetches the current inventory list from the backend.
-  Future<List<dynamic>> fetchInventory() async {
-    final uri = Uri.parse('${AppConfig.backendBaseUrl}/inventory');
-    final response = await _client
-        .get(uri)
-        .timeout(AppConfig.backendTimeout);
-
-    final data = _handleResponse(response);
-    return data['items'] as List<dynamic>? ?? [];
-  }
-
-  /// Fetches all udhaar (credit) entries from the backend.
-  Future<List<dynamic>> fetchUdhaar() async {
-    final uri = Uri.parse('${AppConfig.backendBaseUrl}/udhaar');
-    final response = await _client
-        .get(uri)
-        .timeout(AppConfig.backendTimeout);
-
-    final data = _handleResponse(response);
-    return data['entries'] as List<dynamic>? ?? [];
-  }
-
-  /// Fetches all tasks from the backend.
-  Future<List<dynamic>> fetchTasks() async {
-    final uri = Uri.parse('${AppConfig.backendBaseUrl}/tasks');
-    final response = await _client
-        .get(uri)
-        .timeout(AppConfig.backendTimeout);
-
-    final data = _handleResponse(response);
-    return data['tasks'] as List<dynamic>? ?? [];
-  }
-
-  /// Parses backend responses and throws a descriptive exception on failures.
-  Map<String, dynamic> _handleResponse(http.Response response) {
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      return body;
+    http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'transcript': transcript}),
+          )
+          .timeout(AppConfig.backendTimeout);
+    } on SocketException catch (e) {
+      debugPrint('[BackendApi] SocketException: $e');
+      throw const BackendException(
+        "Couldn't reach the server. Is the backend running?",
+      );
+    } on TimeoutException catch (e) {
+      debugPrint('[BackendApi] TimeoutException: $e');
+      throw const BackendException(
+        'The server took too long to respond. Try again.',
+      );
+    } on HttpException catch (e) {
+      debugPrint('[BackendApi] HttpException: $e');
+      throw BackendException('Network error: ${e.message}');
     }
 
-    throw HttpException(
-      'Backend request failed: ${response.statusCode} ${response.body}',
-      uri: response.request?.url,
-    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      debugPrint(
+        '[BackendApi] HTTP ${response.statusCode}: ${response.body}',
+      );
+      throw BackendException(
+        'Server returned ${response.statusCode}. Try again.',
+      );
+    }
+
+    try {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      debugPrint('[BackendApi] Parsed response: $json');
+      return ParsedAction.fromJson(json);
+    } on FormatException catch (e) {
+      debugPrint('[BackendApi] FormatException: $e');
+      throw const BackendException(
+        "Couldn't understand the server response.",
+      );
+    }
   }
+}
+
+/// Thrown when the backend is unreachable, times out, or returns an error.
+///
+/// Carries a user-friendly message suitable for display in a SnackBar.
+class BackendException implements Exception {
+  const BackendException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'BackendException: $message';
 }

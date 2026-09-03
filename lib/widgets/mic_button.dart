@@ -17,7 +17,10 @@ class MicButton extends StatefulWidget {
   final bool isListening;
 
   /// Called when the user taps the microphone.
-  final VoidCallback onTap;
+  ///
+  /// When null, the button appears dimmed and non-interactive (e.g. while
+  /// the backend is processing a previous command).
+  final VoidCallback? onTap;
 
   /// Diameter of the button.
   final double size;
