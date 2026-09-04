@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:khata_app/models/inventory_item.dart';
 import 'package:khata_app/models/task.dart';
@@ -126,6 +128,108 @@ class AppState extends ChangeNotifier {
   void removeUdhaar(String id) {
     _udhaar.removeWhere((entry) => entry.id == id);
     notifyListeners();
+  }
+
+  /// Finds unsettled udhaar entries whose customer name closely matches
+  /// [name], best match first.
+  ///
+  /// Voice transcripts rarely match stored names exactly ("Ahmad Khan" vs
+  /// "Ahmed Khan"), so matching is case-insensitive and tolerant: exact,
+  /// prefix ("ahmad" → "Ahmad Khan"), word-subset ("khan" → "Ahmed Khan"),
+  /// and fuzzy spelling variants all count. Settled entries are excluded —
+  /// new credit for a customer whose previous entry is paid should start a
+  /// fresh entry, not resurrect the old one.
+  List<UdhaarEntry> findUdhaarMatches(String name) {
+    final scored = <(double, UdhaarEntry)>[];
+    for (final entry in _udhaar) {
+      if (entry.isPaid) continue;
+      final score = _nameMatchScore(name, entry.customerName);
+      if (score >= 0.75) scored.add((score, entry));
+    }
+    scored.sort((a, b) {
+      final byScore = b.$1.compareTo(a.$1);
+      if (byScore != 0) return byScore;
+      return b.$2.createdAt.compareTo(a.$2.createdAt);
+    });
+    return [for (final match in scored) match.$2];
+  }
+
+  /// Finds inventory items whose name closely matches [name], best match
+  /// first. Uses the same tolerant rules as [findUdhaarMatches].
+  List<InventoryItem> findInventoryMatches(String name) {
+    final scored = <(double, InventoryItem)>[];
+    for (final item in _inventory) {
+      final score = _nameMatchScore(name, item.name);
+      if (score >= 0.75) scored.add((score, item));
+    }
+    scored.sort((a, b) {
+      final byScore = b.$1.compareTo(a.$1);
+      if (byScore != 0) return byScore;
+      return b.$2.createdAt.compareTo(a.$2.createdAt);
+    });
+    return [for (final match in scored) match.$2];
+  }
+
+  /// Scores how closely a spoken [query] matches a stored [candidate] name.
+  ///
+  /// Returns 0 for no match, 1 for exact. Tiers (highest wins):
+  /// exact 1.0, prefix 0.9, all-query-words-present 0.85, fuzzy ≥ 0.8.
+  static double _nameMatchScore(String query, String candidate) {
+    final q = _normalizeName(query);
+    final c = _normalizeName(candidate);
+    if (q.isEmpty || c.isEmpty) return 0;
+
+    if (q == c) return 1;
+    if (q.length >= 3 && (c.startsWith(q) || q.startsWith(c))) return 0.9;
+
+    final qWords = q.split(' ');
+    final cWords = c.split(' ');
+    if (qWords.length <= cWords.length &&
+        qWords.every((word) => cWords.contains(word))) {
+      return 0.85;
+    }
+
+    final full = _similarity(q, c);
+    if (full >= 0.8) return full;
+
+    // Single spoken word against a multi-word stored name — "ahmad"
+    // should still find "Ahmed Khan".
+    if (qWords.length == 1 && cWords.length > 1) {
+      var best = 0.0;
+      for (final word in cWords) {
+        best = math.max(best, _similarity(qWords[0], word));
+      }
+      if (best >= 0.8) return best * 0.95;
+    }
+    return 0;
+  }
+
+  static String _normalizeName(String name) {
+    return name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  /// Normalized Levenshtein similarity: 1 = identical, 0 = completely
+  /// different.
+  static double _similarity(String a, String b) {
+    if (a == b) return 1;
+    if (a.isEmpty || b.isEmpty) return 0;
+
+    var prev = List<int>.generate(b.length + 1, (i) => i);
+    var curr = List<int>.filled(b.length + 1, 0);
+    for (var i = 1; i <= a.length; i++) {
+      curr[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        curr[j] = math.min(
+          math.min(prev[j] + 1, curr[j - 1] + 1),
+          prev[j - 1] + cost,
+        );
+      }
+      final swap = prev;
+      prev = curr;
+      curr = swap;
+    }
+    return 1 - prev[b.length] / math.max(a.length, b.length);
   }
 
   /// Seeds the app with realistic demo data so the UI is navigable

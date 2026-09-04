@@ -12,6 +12,7 @@ import 'package:khata_app/services/backend_api_service.dart';
 import 'package:khata_app/services/speech_service.dart';
 import 'package:khata_app/theme/app_theme.dart';
 import 'package:khata_app/widgets/mic_button.dart';
+import 'package:khata_app/widgets/voice_answer_dialog.dart';
 import 'package:khata_app/widgets/voice_confirmation_dialog.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -170,13 +171,33 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _isProcessing = false);
 
-      final confirmedAction = await VoiceConfirmationDialog.show(
+      // Query commands are answered directly with a read-only dialog
+      // instead of navigating to a screen.
+      if (parsedAction.isQuery) {
+        _answerQuery(parsedAction);
+        return;
+      }
+
+      final appState = context.read<AppState>();
+      final isUdhaarAction = parsedAction.type == VoiceActionType.addUdhaar ||
+          parsedAction.type == VoiceActionType.reduceUdhaar;
+      final udhaarCandidates = isUdhaarAction
+          ? appState.findUdhaarMatches(parsedAction.customerName ?? '')
+          : const <UdhaarEntry>[];
+      final inventoryCandidates =
+          parsedAction.type == VoiceActionType.addInventory
+              ? appState.findInventoryMatches(parsedAction.name ?? '')
+              : const <InventoryItem>[];
+
+      final result = await VoiceConfirmationDialog.show(
         context,
         parsedAction,
+        udhaarCandidates: udhaarCandidates,
+        inventoryCandidates: inventoryCandidates,
       );
 
-      if (confirmedAction != null && mounted) {
-        _applyAction(confirmedAction);
+      if (result != null && mounted) {
+        _applyAction(result);
       }
     } on BackendException catch (e) {
       debugPrint('[HomeScreen] BackendException: $e');
@@ -193,44 +214,358 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Answers a query-type action directly with a read-only dialog.
+  void _answerQuery(ParsedAction action) {
+    final appState = context.read<AppState>();
+
+    switch (action.type) {
+      case VoiceActionType.queryBalance:
+        _answerBalanceQuery(action, appState);
+
+      case VoiceActionType.queryItemStock:
+        _answerItemStockQuery(action, appState);
+
+      case VoiceActionType.queryItemPrice:
+        _answerItemPriceQuery(action, appState);
+
+      case VoiceActionType.queryLowStock:
+        _answerLowStockQuery(appState);
+
+      case VoiceActionType.queryInventoryCount:
+        _answerInventoryCountQuery(appState);
+
+      default:
+        break;
+    }
+  }
+
+  /// Balance lookup: single match shows the amount, multiple matches list
+  /// every close-name customer with their balance so the shopkeeper can
+  /// read the one they meant without an extra selection step.
+  void _answerBalanceQuery(ParsedAction action, AppState appState) {
+    const icon = Icons.account_balance_wallet_outlined;
+    const title = 'Customer Balance';
+    final queryName = action.customerName ?? action.name ?? '';
+
+    if (queryName.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: "Couldn't hear a customer name in that command",
+      );
+      return;
+    }
+
+    final matches = appState.findUdhaarMatches(queryName);
+
+    if (matches.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: 'No udhaar record found for "$queryName"',
+      );
+      return;
+    }
+
+    if (matches.length == 1) {
+      final entry = matches.single;
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: '${entry.customerName} owes Rs. ${_fmtRs(entry.amount)}',
+        details: [
+          if (entry.phoneNumber.isNotEmpty) 'Phone: ${entry.phoneNumber}',
+          'Recorded on ${_fmtDate(entry.createdAt)}',
+          if (entry.description != null && entry.description!.isNotEmpty)
+            'Note: ${entry.description}',
+        ],
+      );
+      return;
+    }
+
+    VoiceAnswerDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      headline: '${matches.length} customers match "$queryName"',
+      rows: [
+        for (final entry in matches)
+          VoiceAnswerRow(
+            title: entry.customerName,
+            subtitle: 'Owes Rs. ${_fmtRs(entry.amount)}',
+          ),
+      ],
+    );
+  }
+
+  void _answerItemStockQuery(ParsedAction action, AppState appState) {
+    const icon = Icons.inventory_2_outlined;
+    const title = 'Item Stock';
+    final queryName = action.name ?? '';
+
+    if (queryName.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: "Couldn't hear a product name in that command",
+      );
+      return;
+    }
+
+    final matches = appState.findInventoryMatches(queryName);
+
+    if (matches.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: '"$queryName" is not in your inventory',
+      );
+      return;
+    }
+
+    if (matches.length == 1) {
+      final item = matches.single;
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: '${item.name}: ${item.quantity} ${item.unit} in stock',
+        details: [
+          'Sale price: Rs. ${_fmtRs(item.salePrice)} per ${item.unit}',
+          if (item.isLowStock)
+            'Low on stock — minimum level is ${item.minStockLevel}',
+        ],
+      );
+      return;
+    }
+
+    VoiceAnswerDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      headline: '${matches.length} items match "$queryName"',
+      rows: [
+        for (final item in matches)
+          VoiceAnswerRow(
+            title: item.name,
+            subtitle: '${item.quantity} ${item.unit} in stock · '
+                'Rs. ${_fmtRs(item.salePrice)}',
+          ),
+      ],
+    );
+  }
+
+  void _answerItemPriceQuery(ParsedAction action, AppState appState) {
+    const icon = Icons.local_offer_outlined;
+    const title = 'Item Price';
+    final queryName = action.name ?? '';
+
+    if (queryName.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: "Couldn't hear a product name in that command",
+      );
+      return;
+    }
+
+    final matches = appState.findInventoryMatches(queryName);
+
+    if (matches.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: '"$queryName" is not in your inventory',
+      );
+      return;
+    }
+
+    if (matches.length == 1) {
+      final item = matches.single;
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline:
+            '${item.name}: Rs. ${_fmtRs(item.salePrice)} per ${item.unit}',
+        details: [
+          '${item.quantity} ${item.unit} in stock',
+          if (item.isLowStock)
+            'Low on stock — minimum level is ${item.minStockLevel}',
+        ],
+      );
+      return;
+    }
+
+    VoiceAnswerDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      headline: '${matches.length} items match "$queryName"',
+      rows: [
+        for (final item in matches)
+          VoiceAnswerRow(
+            title: item.name,
+            subtitle: 'Rs. ${_fmtRs(item.salePrice)} per ${item.unit} · '
+                '${item.quantity} in stock',
+          ),
+      ],
+    );
+  }
+
+  void _answerLowStockQuery(AppState appState) {
+    const icon = Icons.warning_amber_outlined;
+    const title = 'Low Stock';
+    final lowItems =
+        appState.inventory.where((item) => item.isLowStock).toList();
+
+    if (lowItems.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: 'No items are low on stock',
+      );
+      return;
+    }
+
+    VoiceAnswerDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      headline: '${lowItems.length} '
+          '${lowItems.length == 1 ? 'item is' : 'items are'} low on stock',
+      rows: [
+        for (final item in lowItems)
+          VoiceAnswerRow(
+            title: item.name,
+            subtitle: '${item.quantity} ${item.unit} left · '
+                'minimum ${item.minStockLevel}',
+          ),
+      ],
+    );
+  }
+
+  void _answerInventoryCountQuery(AppState appState) {
+    final items = appState.inventory;
+    final lowCount = items.where((item) => item.isLowStock).length;
+    VoiceAnswerDialog.show(
+      context,
+      icon: Icons.calculate_outlined,
+      title: 'Inventory Count',
+      headline: 'You have ${items.length} '
+          '${items.length == 1 ? 'item' : 'items'} in inventory',
+      details: [
+        if (lowCount > 0) '$lowCount low on stock',
+      ],
+    );
+  }
+
+  String _fmtRs(double value) => value == value.roundToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(2);
+
+  String _fmtDate(DateTime date) => '${date.day}/${date.month}/${date.year}';
+
   /// Applies a confirmed voice action to the AppState.
   ///
-  /// Routes to the appropriate tab if the action is a navigation command,
-  /// otherwise adds the parsed entry to the relevant list.
-  void _applyAction(ParsedAction action) {
+  /// Udhaar and inventory actions update an existing record when the user
+  /// picked one in the confirmation dialog, and only create a new record
+  /// otherwise. Navigation commands just switch tabs.
+  void _applyAction(VoiceConfirmationResult result) {
+    final action = result.action;
     final appState = context.read<AppState>();
 
     switch (action.type) {
       case VoiceActionType.addInventory:
-        final id = 'inv-${DateTime.now().millisecondsSinceEpoch}';
-        appState.addInventoryItem(
-          InventoryItem(
-            id: id,
-            name: action.name ?? 'New Item',
-            category: action.category ?? 'General',
-            quantity: action.quantity ?? 1,
-            unit: action.unit ?? 'pcs',
-            purchasePrice: action.purchasePrice ?? 0.0,
-            salePrice: action.salePrice ?? 0.0,
-            createdAt: DateTime.now(),
-          ),
-        );
-        _showMessage('Added "${action.name}" to inventory');
+        final target = result.inventoryTarget;
+        if (target != null) {
+          var updated = target;
+          final salePrice = action.salePrice ?? 0;
+          if (salePrice > 0) updated = updated.copyWith(salePrice: salePrice);
+          final purchasePrice = action.purchasePrice ?? 0;
+          if (purchasePrice > 0) {
+            updated = updated.copyWith(purchasePrice: purchasePrice);
+          }
+          // A parsed quantity of 1 is the backend default for unspecified
+          // quantities, so only add stock when more was actually spoken.
+          final qty = action.quantity ?? 0;
+          if (qty > 1) {
+            updated = updated.copyWith(quantity: updated.quantity + qty);
+          }
+          appState.updateInventoryItem(updated);
+          _showMessage('Updated "${target.name}"');
+        } else {
+          final id = 'inv-${DateTime.now().millisecondsSinceEpoch}';
+          appState.addInventoryItem(
+            InventoryItem(
+              id: id,
+              name: action.name ?? 'New Item',
+              category: action.category ?? 'General',
+              quantity: action.quantity ?? 1,
+              unit: action.unit ?? 'pcs',
+              purchasePrice: action.purchasePrice ?? 0.0,
+              salePrice: action.salePrice ?? 0.0,
+              createdAt: DateTime.now(),
+            ),
+          );
+          _showMessage('Added "${action.name}" to inventory');
+        }
         _switchToTab(0);
 
       case VoiceActionType.addUdhaar:
-        final id = 'udh-${DateTime.now().millisecondsSinceEpoch}';
-        appState.addUdhaar(
-          UdhaarEntry(
-            id: id,
-            customerName: action.customerName ?? 'Unknown',
-            phoneNumber: action.phoneNumber ?? '',
-            amount: action.amount ?? 0.0,
-            description: action.description,
-            createdAt: DateTime.now(),
+        final target = result.udhaarTarget;
+        final amount = action.amount ?? 0.0;
+        if (target != null) {
+          final newTotal = target.amount + amount;
+          appState.updateUdhaar(target.copyWith(amount: newTotal));
+          _showMessage('Updated udhaar for "${target.customerName}" — '
+              'new total Rs. ${newTotal.toStringAsFixed(0)}');
+        } else {
+          final id = 'udh-${DateTime.now().millisecondsSinceEpoch}';
+          appState.addUdhaar(
+            UdhaarEntry(
+              id: id,
+              customerName: action.customerName ?? 'Unknown',
+              phoneNumber: action.phoneNumber ?? '',
+              amount: amount,
+              description: action.description,
+              createdAt: DateTime.now(),
+            ),
+          );
+          _showMessage('Recorded udhaar for "${action.customerName}"');
+        }
+        _switchToTab(2);
+
+      case VoiceActionType.reduceUdhaar:
+        final target = result.udhaarTarget;
+        if (target == null) {
+          _showMessage("Couldn't apply the payment — no matching udhaar "
+              'record was selected');
+          return;
+        }
+        final paid = action.amount ?? 0.0;
+        final remaining = target.amount - paid;
+        final newAmount = remaining > 0 ? remaining : 0.0;
+        final settled = newAmount <= 0;
+        appState.updateUdhaar(
+          target.copyWith(
+            amount: newAmount,
+            isPaid: settled ? true : target.isPaid,
+            paidAt: settled ? DateTime.now() : target.paidAt,
           ),
         );
-        _showMessage('Recorded udhaar for "${action.customerName}"');
+        _showMessage(settled
+            ? 'Payment recorded — "${target.customerName}" is fully settled'
+            : 'Payment recorded — "${target.customerName}" owes '
+                'Rs. ${newAmount.toStringAsFixed(0)}');
         _switchToTab(2);
 
       case VoiceActionType.addTask:
@@ -246,11 +581,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _showMessage('Created task "${action.title}"');
         _switchToTab(1);
 
-      case VoiceActionType.queryBalance:
-        _showMessage(
-          'Looking up balance for "${action.customerName ?? 'Unknown'}"',
-        );
-        _switchToTab(2);
+      case VoiceActionType.queryBalance ||
+           VoiceActionType.queryItemStock ||
+           VoiceActionType.queryItemPrice ||
+           VoiceActionType.queryLowStock ||
+           VoiceActionType.queryInventoryCount:
+        // Query actions are answered by _answerQuery before the
+        // confirmation dialog is ever shown; answering here too keeps
+        // this path correct if it is ever reached.
+        _answerQuery(action);
 
       case VoiceActionType.navigate:
         final tabIndex = _tabIndexFromTarget(action.targetTab);

@@ -77,6 +77,55 @@ CASES = [
         lambda r: r.get("customer_name", "").lower().startswith("nad"),
     ),
 
+    # reduce_udhaar — customer paid back / settled part of existing credit
+    (
+        "Ahmad Khan ka udhaar 500 kaat do",
+        "reduce_udhaar",
+        lambda r: r.get("customer_name", "").lower().startswith("ahmad")
+        and float(r.get("amount", 0)) == 500,
+    ),
+    (
+        "aaj Sara ne 400 wapas kiye hisab mein minus kar do",
+        "reduce_udhaar",
+        lambda r: r.get("customer_name", "").lower().startswith("sara")
+        and float(r.get("amount", 0)) == 400,
+    ),
+    (
+        "Bilal ne 1000 rupaye jama kiye",
+        "reduce_udhaar",
+        lambda r: r.get("customer_name", "").lower().startswith("bilal")
+        and float(r.get("amount", 0)) == 1000,
+    ),
+    ("Ali ka udhaar clear kar do 700", "reduce_udhaar", None),
+    ("Kamran ka 300 udhaar minus karo", "reduce_udhaar", None),
+
+    # Query actions — direct answers, no navigation
+    (
+        "Tapal hai inventory mein?",
+        "query_item_stock",
+        lambda r: r.get("name", "").lower().startswith("tapal"),
+    ),
+    (
+        "Nestle juice hai kya",
+        "query_item_stock",
+        lambda r: r.get("name", "").lower().startswith("nestle"),
+    ),
+    ("cheeni ka stock hai", "query_item_stock", None),
+    (
+        "Shan biryani kitne ki hai",
+        "query_item_price",
+        lambda r: r.get("name", "").lower().startswith("shan"),
+    ),
+    (
+        "Tapal ka daam kya hai",
+        "query_item_price",
+        lambda r: r.get("name", "").lower().startswith("tapal"),
+    ),
+    ("kaunse item ka stock kam hai", "query_low_stock", None),
+    ("kitne items low stock mein hain", "query_low_stock", None),
+    ("total kitne item hain", "query_inventory_count", None),
+    ("inventory mein kitne products hain", "query_inventory_count", None),
+
     # Boundary cases — make sure we didn't regress
     ("Ahmed ka udhaar 500 rupaye likho", "add_udhaar", None),
     ("paanch bottle tel add karo", "add_inventory", None),

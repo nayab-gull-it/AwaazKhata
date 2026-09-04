@@ -109,14 +109,30 @@ class ParsedAction {
       fields: {...fields, ...overrides},
     );
   }
+
+  /// Whether this action asks for information instead of changing data.
+  ///
+  /// Query actions are answered directly with a read-only dialog instead of
+  /// going through the edit/confirm flow.
+  bool get isQuery =>
+      type == VoiceActionType.queryBalance ||
+      type == VoiceActionType.queryItemStock ||
+      type == VoiceActionType.queryItemPrice ||
+      type == VoiceActionType.queryLowStock ||
+      type == VoiceActionType.queryInventoryCount;
 }
 
 /// Types of action the backend can parse from a voice command.
 enum VoiceActionType {
   addInventory,
   addUdhaar,
+  reduceUdhaar,
   addTask,
   queryBalance,
+  queryItemStock,
+  queryItemPrice,
+  queryLowStock,
+  queryInventoryCount,
   navigate,
   unknown;
 
@@ -124,8 +140,13 @@ enum VoiceActionType {
     return switch (raw.toLowerCase()) {
       'add_inventory' => addInventory,
       'add_udhaar' => addUdhaar,
+      'reduce_udhaar' => reduceUdhaar,
       'add_task' => addTask,
       'query_balance' => queryBalance,
+      'query_item_stock' => queryItemStock,
+      'query_item_price' => queryItemPrice,
+      'query_low_stock' => queryLowStock,
+      'query_inventory_count' => queryInventoryCount,
       'navigate' => navigate,
       _ => unknown,
     };
@@ -135,8 +156,13 @@ enum VoiceActionType {
   String get label => switch (this) {
         addInventory => 'Add Inventory Item',
         addUdhaar => 'Record Udhaar',
+        reduceUdhaar => 'Reduce Udhaar (Payment)',
         addTask => 'Create Task',
         queryBalance => 'Look Up Balance',
+        queryItemStock => 'Item Stock',
+        queryItemPrice => 'Item Price',
+        queryLowStock => 'Low Stock Items',
+        queryInventoryCount => 'Inventory Count',
         navigate => 'Navigate',
         unknown => 'Unrecognized Command',
       };

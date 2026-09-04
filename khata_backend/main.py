@@ -2,8 +2,8 @@
 
 The Flutter app sends a raw speech transcript to POST /parse-command.
 This backend asks Qwen to extract a structured action (add inventory,
-record udhaar, create task, or navigate) and returns JSON that the
-Flutter ParsedAction model can consume directly.
+record or settle udhaar, create task, or navigate) and returns JSON that
+the Flutter ParsedAction model can consume directly.
 """
 
 from __future__ import annotations
@@ -89,9 +89,14 @@ you must decide what they intended.
 Return ONLY a single JSON object (no markdown, no explanation) with these rules:
 
 1. The "action" key must be exactly one of:
-   - "query_balance"  — user is ASKING how much is owed/to-pay for a customer (a QUESTION, not a write)
+   - "query_balance"  — user is ASKING how much is owed/to-pay for a CUSTOMER (a QUESTION, not a write)
+   - "query_item_stock" — user is ASKING whether a PRODUCT exists in stock / how much of it is in stock
+   - "query_item_price" — user is ASKING the PRICE of a PRODUCT
+   - "query_low_stock" — user is ASKING WHICH items/products are low on stock
+   - "query_inventory_count" — user is ASKING HOW MANY items/products exist in total
    - "add_inventory"  — user wants to add/stock a product (no customer involved)
-   - "add_udhaar"     — user wants to RECORD a credit/debt entry against a customer
+   - "add_udhaar"     — user wants to RECORD NEW credit for a customer (the amount they owe goes UP)
+   - "reduce_udhaar"  — customer PAID BACK — user wants to REDUCE/settle an existing credit (the amount they owe goes DOWN)
    - "add_task"       — user wants to create a reminder or to-do
    - "navigate"       — user wants to switch to a tab (inventory, tasks, udhaar)
 
@@ -111,8 +116,38 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
        "Rashid ko kitna dena hai".
        Output only the customer name — the app looks the balance up itself.
        This is NOT add_udhaar because no amount is being RECORDED; it is being ASKED.
+       A question about a PRODUCT's price or stock is NOT query_balance — use \
+       query_item_stock / query_item_price / query_low_stock / query_inventory_count \
+       instead. A PERSON's name ("Ahmad", "Bashir bhai") means query_balance; a \
+       PRODUCT name ("Tapal", "Shan biryani") means a query_item_* action.
 
-   (c) add_task:
+   (c) query_item_stock — asking IF a product exists or HOW MANY are in stock:
+       Trigger for questions about a product's availability or quantity: \
+       "Tapal hai inventory mein?", "Nestle juice hai kya", "cheeni ka stock hai", \
+       "do we have milk", "tel kitna stock hai". Look for "hai kya", "mujood", \
+       "available", "stock hai", "inventory mein", "kitna stock".
+       Output the product name in "name".
+
+   (d) query_item_price — asking a PRODUCT's price:
+       Trigger when the user asks what a product costs: "Shan biryani kitne ki hai", \
+       "Tapal ka daam kya hai", "Nestle ka rate batao", "what's the price of sugar". \
+       Look for "kitne ki", "kitne ka", "price", "daam", "qimat", "rate".
+       Output the product name in "name".
+
+   (e) query_low_stock — asking WHICH items are low on stock:
+       Trigger for questions about items running low: "kaunse item ka stock kam hai", \
+       "kitne items low stock mein hain", "kaun si cheez kam hai", \
+       "which items are running low". Look for "kam"/"low" together with \
+       item/stock words.
+       No extra fields — the app lists its own low-stock items.
+
+   (f) query_inventory_count — asking HOW MANY items exist in total:
+       Trigger for total-count questions: "total kitne item hain", \
+       "inventory mein kitne products hain", "how many items do I have". \
+       Look for "total" or "kitne" together with item/product words.
+       No extra fields — the app counts its own inventory.
+
+   (g) add_task:
        Trigger when the transcript is about a REMINDER, TO-DO, or FUTURE ACTION.
        Look for words like "task", "reminder", "yaad", "banao/bana do", "karna hai", \
        "restock karne ka", "schedule", "subah/shaam ko", "roz/har roz", time \
@@ -120,16 +155,28 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
        The presence of a product name does NOT make it inventory — if the sentence \
        is about restocking, checking, or remembering, it is a task.
 
-   (d) add_udhaar  — this is a WRITE/RECORD intent with a customer + money:
+   (h) reduce_udhaar — customer PAID BACK / settled part of an existing credit:
+       Trigger when the user wants an amount SUBTRACTED from a customer's \
+       outstanding udhaar — the customer returned money. Look for words like \
+       "kaat", "kaat do", "minus", "wapas", "jama", "chuka", "chukaya", \
+       "clear", "settle", "paid", "payment", "return".
+       Key phrases: "ka udhaar 500 kaat do", "ke hisab se 300 minus karo", \
+       "ne 400 wapas kiye", "ka 1000 jama liya", "ka udhaar clear kar do".
+       This is the OPPOSITE of add_udhaar — the outstanding amount goes DOWN. \
+       If the customer is receiving NEW credit (amount goes up), use add_udhaar.
+
+   (i) add_udhaar  — this is a WRITE/RECORD intent with a customer + money:
        Trigger ONLY when a CUSTOMER (person name, "khata/khate", "udhaar", "hisab", \
        "account", "credit") is explicitly involved AND an AMOUNT is being RECORDED \
-       (mentioned or strongly implied).
+       (mentioned or strongly implied) as NEW credit the customer now owes.
        Key phrases: "ke khate mein 500 add karo", "ka udhaar 500 likho", \
        "ko 1200 credit karo", "ke hisab mein 300 jor do", "itne rupaye daal do".
        If the sentence is a QUESTION about balance, prefer query_balance instead.
+       If the user wants to REDUCE/settle an amount ("kaat", "minus", "wapas", \
+       "jama", "chuka", "clear"), use reduce_udhaar instead.
        If there is no person/customer, it is NOT udhaar.
 
-   (e) add_inventory:
+   (j) add_inventory:
        Trigger ONLY when the user wants to ADD/STOCK a physical product AND \
        NO customer is mentioned. Look for quantity + item + unit phrases like \
        "5 bottle tel", "do pack sabun add karo", "stock", "manga", "lao".
@@ -143,6 +190,18 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
      "direction" (one of "outgoing" = customer owes the shop, \
      "incoming" = shop owes the customer; default "outgoing" if unclear)
 
+   query_item_stock:
+     "name" (string — the product the user is asking about)
+
+   query_item_price:
+     "name" (string — the product whose price is being asked)
+
+   query_low_stock:
+     (no extra fields)
+
+   query_inventory_count:
+     (no extra fields)
+
    add_inventory:
      "name" (string), "quantity" (integer), "unit" (string, e.g. "pcs", "kg", \
 "bottle", "pack"), "category" (string), "purchase_price" (number), \
@@ -150,7 +209,11 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
 
    add_udhaar:
      "customer_name" (string), "phone_number" (string or empty), \
-"amount" (number), "description" (string)
+"amount" (number — the NEW credit to add), "description" (string)
+
+   reduce_udhaar:
+     "customer_name" (string), "phone_number" (string or empty), \
+"amount" (number — the amount to SUBTRACT), "description" (string)
 
    add_task:
      "title" (string), "description" (string)
@@ -203,6 +266,71 @@ Transcript: "kitna outstanding hai Kamran ka"
 Transcript: "what's Imran's balance"
 {"action":"query_balance","customer_name":"Imran","direction":"outgoing"}
 
+=== query_item_stock (asking IF a product exists / HOW MUCH is in stock) ===
+
+Transcript: "Tapal hai inventory mein?"
+{"action":"query_item_stock","name":"Tapal"}
+
+Transcript: "Nestle juice hai kya"
+{"action":"query_item_stock","name":"Nestle Juice"}
+
+Transcript: "cheeni ka stock hai"
+{"action":"query_item_stock","name":"Sugar"}
+
+Transcript: "Surf Excel mujood hai"
+{"action":"query_item_stock","name":"Surf Excel"}
+
+Transcript: "tel kitna stock hai"
+{"action":"query_item_stock","name":"Cooking Oil"}
+
+Transcript: "do we have Shan biryani masala"
+{"action":"query_item_stock","name":"Shan Biryani Masala"}
+
+=== query_item_price (asking a PRODUCT's price) ===
+
+Transcript: "Shan biryani kitne ki hai"
+{"action":"query_item_price","name":"Shan Biryani"}
+
+Transcript: "Tapal ka daam kya hai"
+{"action":"query_item_price","name":"Tapal"}
+
+Transcript: "cheeni kitne ki hai"
+{"action":"query_item_price","name":"Sugar"}
+
+Transcript: "Nestle Milkpak ka rate batao"
+{"action":"query_item_price","name":"Nestle Milkpak"}
+
+Transcript: "what's the price of Dalda oil"
+{"action":"query_item_price","name":"Dalda Oil"}
+
+=== query_low_stock (asking WHICH items are low on stock) ===
+
+Transcript: "kaunse item ka stock kam hai"
+{"action":"query_low_stock"}
+
+Transcript: "kitne items low stock mein hain"
+{"action":"query_low_stock"}
+
+Transcript: "kaun si cheez kam hai"
+{"action":"query_low_stock"}
+
+Transcript: "which items are running low"
+{"action":"query_low_stock"}
+
+=== query_inventory_count (asking HOW MANY items exist in total) ===
+
+Transcript: "total kitne item hain"
+{"action":"query_inventory_count"}
+
+Transcript: "inventory mein kitne products hain"
+{"action":"query_inventory_count"}
+
+Transcript: "kitne item total hain"
+{"action":"query_inventory_count"}
+
+Transcript: "how many items do I have"
+{"action":"query_inventory_count"}
+
 === add_udhaar (RECORD credit/debt — customer + amount + write intent) ===
 
 Transcript: "Ahmad ke khate mein 500 add karo"
@@ -229,8 +357,25 @@ Transcript: "Kamran ke account mein 1500 daal do"
 Transcript: "record 2000 rupees owed by Imran"
 {"action":"add_udhaar","customer_name":"Imran","phone_number":"","amount":2000,"description":"Voice-recorded credit"}
 
+=== reduce_udhaar (customer PAID BACK — outstanding amount goes DOWN) ===
+
+Transcript: "Ahmad Khan ka udhaar 500 kaat do"
+{"action":"reduce_udhaar","customer_name":"Ahmad Khan","phone_number":"","amount":500,"description":"Voice-recorded payment"}
+
 Transcript: "aaj Sara ne 400 wapas kiye hisab mein minus kar do"
-{"action":"add_udhaar","customer_name":"Sara","phone_number":"","amount":400,"description":"Voice-recorded credit"}
+{"action":"reduce_udhaar","customer_name":"Sara","phone_number":"","amount":400,"description":"Voice-recorded payment"}
+
+Transcript: "Bilal ne 1000 rupaye jama kiye"
+{"action":"reduce_udhaar","customer_name":"Bilal","phone_number":"","amount":1000,"description":"Voice-recorded payment"}
+
+Transcript: "Ali ka udhaar clear kar do 700"
+{"action":"reduce_udhaar","customer_name":"Ali","phone_number":"","amount":700,"description":"Voice-recorded payment"}
+
+Transcript: "Kamran ka 300 udhaar minus karo"
+{"action":"reduce_udhaar","customer_name":"Kamran","phone_number":"","amount":300,"description":"Voice-recorded payment"}
+
+Transcript: "Imran ne 1500 chuka diye"
+{"action":"reduce_udhaar","customer_name":"Imran","phone_number":"","amount":1500,"description":"Voice-recorded payment"}
 
 === add_inventory (product + quantity, no customer) ===
 
@@ -414,13 +559,21 @@ def _extract_json(raw: str) -> dict:
 def _keyword_fallback(transcript: str) -> dict:
     """Simple keyword-based intent detection for when Groq is unavailable.
 
-    Priority: navigate > query_balance > add_task > add_udhaar > add_inventory
-    > unknown.
-    Query-balance beats add_udhaar because "kitna/baki/balance" questions are
-    distinct from recording entries. Task beats inventory because sentences like
+    Priority: navigate > query_low_stock > query_inventory_count
+    > query_item_price > query_item_stock > query_balance > add_task
+    > reduce_udhaar > add_udhaar > add_inventory > unknown.
+    The query_* branches come BEFORE query_balance because "kitne" questions
+    about products ("total kitne item hain", "Shan biryani kitne ki hai")
+    would otherwise be swallowed by query_balance's question markers, and
+    before add_inventory because "kaunse item ka stock kam hai" mentions
+    "stock" but is a question, not a restock. Query-balance still beats
+    add_udhaar because "kitna/baki/balance" questions are distinct from
+    recording entries. Task beats inventory because sentences like
     "chini restock karne ka task banao" mention a product but are still
-    reminders. Udhaar beats inventory because the presence of a customer name
-    or "khata/udhaar/hisab" flips the intent from stocking to credit.
+    reminders. Reduce beats add because "kaat/minus/wapas/jama" sentences
+    mention udhaar but must subtract, not record new credit. Udhaar beats
+    inventory because the presence of a customer name or "khata/udhaar/hisab"
+    flips the intent from stocking to credit.
     """
     t = transcript.lower()
     # Tokenize — split on whitespace + strip punctuation for stable word matches.
@@ -436,6 +589,41 @@ def _keyword_fallback(transcript: str) -> dict:
             return {"action": "navigate", "target_tab": "tasks"}
         if {"udhaar", "credit", "khata", "khate", "hisab", "hisaab"} & tok_set:
             return {"action": "navigate", "target_tab": "udhaar"}
+
+    item_words = {"item", "items", "product", "products", "cheez", "cheezein"}
+    stock_words = {"stock", "inventory", "samaan"}
+
+    # Low-stock question — "kaunse item ka stock kam hai" mentions "stock"
+    # but is a question; must not fall through to add_inventory.
+    if ({"kam", "low"} & tok_set) and (
+        (item_words & tok_set) or (stock_words & tok_set)
+    ):
+        return {"action": "query_low_stock"}
+
+    # Inventory total-count question — "total kitne item hain".
+    if ({"total", "kitne", "kitna"} & tok_set) and (item_words & tok_set):
+        return {"action": "query_inventory_count"}
+
+    # Item price question — "Shan biryani kitne ki hai", "Tapal ka daam kya hai".
+    price_words = {"price", "daam", "dam", "qimat", "kimat", "rate"}
+    if (price_words & tok_set) or any(
+        p in t for p in ("kitne ki", "kitne ka", "kitni ki", "kitni ka")
+    ):
+        return {
+            "action": "query_item_price",
+            "name": _extract_query_name(transcript) or "Unknown",
+        }
+
+    # Item existence/stock question — "Tapal hai inventory mein?", "juice hai kya".
+    if (
+        ("hai kya" in t)
+        or ({"mujood", "maujood", "available"} & tok_set)
+        or ((stock_words & tok_set) and ({"hai", "hain", "tha"} & tok_set))
+    ):
+        return {
+            "action": "query_item_stock",
+            "name": _extract_query_name(transcript) or "Unknown",
+        }
 
     # Query balance — question about outstanding / remaining / balance.
     # Beats add_udhaar because "Ahmad ka kitna baaki hai" must NOT record a new entry.
@@ -474,6 +662,25 @@ def _keyword_fallback(transcript: str) -> dict:
             "action": "add_task",
             "title": transcript[:60],
             "description": "Voice reminder",
+        }
+
+    # Reduce udhaar — customer paid back / settled part of an existing credit.
+    # Checked BEFORE add_udhaar because "udhaar 500 kaat do" mentions udhaar
+    # (an add signal) but the intent is to subtract, not record new credit.
+    reduce_signals = {
+        "kaat", "kaato", "minus", "wapas", "jama", "chuka", "chukao",
+        "chukaya", "clear", "cleared", "settle", "settled", "paid",
+        "payment", "return", "returned",
+    }
+    if reduce_signals & tok_set:
+        name = _extract_name(transcript)
+        amount = _extract_number(t) or 0.0
+        return {
+            "action": "reduce_udhaar",
+            "customer_name": name or "Unknown",
+            "phone_number": "",
+            "amount": float(amount),
+            "description": "Voice-recorded payment",
         }
 
     # Udhaar — customer/account + money. Check BEFORE inventory so
@@ -545,26 +752,38 @@ def _extract_unit(text: str) -> str:
 def _extract_name(text: str) -> str | None:
     """Try to extract a product or person name (rough heuristic).
 
-    Handles Urdu particles "ke/ka/ki/ko/se" and honorifics like "bhai"
-    that commonly follow a person's name in shopkeeper speech. Case-insensitive
+    Handles Urdu particles "ke/ka/ki/ko/se/ne" and honorifics like "bhai"
+    that commonly follow a person's name in shopkeeper speech. Captures up
+    to two words so full names like "Ahmad Khan" survive. Case-insensitive
     because ASR transcripts often come back lowercased.
     """
+    name_word = r"[A-Za-z\u0600-\u06FF]+"
+    particles = r"(?:ke|ka|ki|ko|se|ne|for|of)"
     patterns = [
-        # Name (optionally followed by honorific) then an Urdu/English particle
-        r"\b([A-Za-z\u0600-\u06FF]+)"
-        r"(?:\s+(?:bhai|bibi|sahab|beta|uncle|aunty))?"
-        r"\s+(?:ke|ka|ki|ko|se|for|of)\b",
-        # Fallback: word after a particle
-        r"(?:for|ka|ki|ke|ko|se|of)\s+([a-zA-Z\u0600-\u06FF]+(?:\s+[a-zA-Z\u0600-\u06FF]+)?)",
+        # Name (one or two words, optionally followed by an honorific) then a
+        # particle — "Ahmad Khan ka ...", "Bashir bhai ko ...", "Sara ne ...".
+        rf"\b({name_word}(?:\s+{name_word})?)"
+        rf"(?:\s+(?:bhai|bibi|sahab|beta|uncle|aunty))?"
+        rf"\s+{particles}\b",
+        # Fallback: word(s) after a particle
+        rf"{particles}\s+({name_word}(?:\s+{name_word})?)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             name = match.group(1).strip()
+            # Drop leading time words — "aaj Sara ne ..." must yield "Sara".
+            time_words = {"aaj", "kal", "subah", "shaam", "sham", "abhi", "phir"}
+            words = [w for w in name.split()]
+            while words and words[0].lower() in time_words:
+                words = words[1:]
+            name = " ".join(words)
+            if not name:
+                continue
             # Skip common Urdu function words that the regex may accidentally grab
             stopwords = {
-                "ke", "ka", "ki", "ko", "se", "mein", "par", "pe", "tak",
-                "tak", "aur", "ya", "magar", "lekin", "bhi", "hi", "nahi",
+                "ke", "ka", "ki", "ko", "se", "ne", "mein", "par", "pe", "tak",
+                "aur", "ya", "magar", "lekin", "bhi", "hi", "nahi",
                 "karo", "karna", "hai", "hain", "tha", "the", "thi",
                 "for", "of", "the", "to", "in", "on", "at", "and", "or",
                 "bhai", "bibi", "sahab", "beta", "uncle", "aunty",
@@ -573,6 +792,39 @@ def _extract_name(text: str) -> str | None:
                 continue
             return name.title()
     return None
+
+
+def _extract_query_name(text: str) -> str | None:
+    """Extract a product name from a QUESTION transcript.
+
+    Question phrasing usually has no ownership particles ("Tapal hai inventory
+    mein?"), so unlike [_extract_name] this takes the words BEFORE the first
+    question/verb token ("hai", "kya", "kitne"...) and drops function words.
+    """
+    tokens = [
+        tok.strip(".,!?;:")
+        for tok in re.findall(r"[\w']+", text.lower(), re.UNICODE)
+    ]
+    # Cut at the first question/verb token — the product name precedes it.
+    for i, tok in enumerate(tokens):
+        if tok in {"hai", "hain", "tha", "kya", "kitna", "kitne", "kitni"}:
+            tokens = tokens[:i]
+            break
+    stopwords = {
+        "hai", "hain", "tha", "the", "thi", "kya", "kaun", "kaunse", "kaunsi",
+        "si", "kitna", "kitne", "kitni", "mein", "par", "pe", "tak", "bhi",
+        "ka", "ke", "ki", "ko", "se", "ne", "aur", "ya", "of", "the", "to",
+        "in", "on", "at", "is", "are", "do", "does", "we", "have", "has",
+        "what", "whats", "what's", "how", "many", "much", "any",
+        "total", "item", "items", "product", "products", "cheez", "cheezein",
+        "stock", "inventory", "samaan", "mujood", "maujood", "available",
+        "low", "kam", "price", "daam", "dam", "qimat", "kimat", "rate",
+        "batao", "bata", "karo", "kar", "karna", "karne", "dikha", "dikhao",
+    }
+    words = [w for w in tokens if w not in stopwords and not w.isdigit()]
+    if not words:
+        return None
+    return " ".join(words[:3]).title()
 
 
 # ---------------------------------------------------------------------------
