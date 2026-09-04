@@ -53,6 +53,9 @@ dependencies:
   # Runtime permission handling for the microphone.
   permission_handler: ^11.4.0
 
+  # Local key-value storage for the demo shop login session.
+  shared_preferences: ^2.3.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

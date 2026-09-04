@@ -6,9 +6,11 @@ import 'package:khata_app/models/task.dart';
 import 'package:khata_app/models/udhaar_entry.dart';
 import 'package:khata_app/providers/app_state.dart';
 import 'package:khata_app/screens/inventory_screen.dart';
+import 'package:khata_app/screens/login_screen.dart';
 import 'package:khata_app/screens/tasks_screen.dart';
 import 'package:khata_app/screens/udhaar_screen.dart';
 import 'package:khata_app/services/backend_api_service.dart';
+import 'package:khata_app/services/session_service.dart';
 import 'package:khata_app/services/speech_service.dart';
 import 'package:khata_app/theme/app_theme.dart';
 import 'package:khata_app/widgets/mic_button.dart';
@@ -640,6 +642,49 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Opens the settings dialog, which shows the logged-in shop and
+  /// offers to log out (clearing the locally saved login info).
+  Future<void> _openSettings() async {
+    final info = await SessionService.shopInfo();
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ReadOnlyInfo(label: 'Shop', value: info.shopName),
+            if (info.shopPhone.isNotEmpty)
+              _ReadOnlyInfo(label: 'Phone', value: info.shopPhone),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+            ),
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              await SessionService.clear();
+              if (!mounted) return;
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     // Stop any active listening session and release plugin resources.
@@ -669,9 +714,7 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           else
             IconButton(
-              onPressed: () {
-                // TODO: Open settings/profile screen.
-              },
+              onPressed: _openSettings,
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
             ),
@@ -716,6 +759,46 @@ class _HomeScreenState extends State<HomeScreen> {
             }),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small label/value row used by the settings dialog.
+class _ReadOnlyInfo extends StatelessWidget {
+  const _ReadOnlyInfo({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 52,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

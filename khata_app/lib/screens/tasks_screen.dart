@@ -3,13 +3,15 @@ import 'package:intl/intl.dart';
 import 'package:khata_app/models/task.dart';
 import 'package:khata_app/providers/app_state.dart';
 import 'package:khata_app/theme/app_theme.dart';
+import 'package:khata_app/widgets/add_task_dialog.dart';
 import 'package:khata_app/widgets/edit_task_dialog.dart';
 import 'package:provider/provider.dart';
 
 /// Screen that lists tasks and reminders.
 ///
 /// Reads task data from [AppState], lets users toggle completion,
-/// and open [EditTaskDialog] to edit a task.
+/// open [EditTaskDialog] to edit a task, and create new tasks manually
+/// via [AddTaskDialog].
 class TasksScreen extends StatelessWidget {
   const TasksScreen({super.key});
 
@@ -20,16 +22,16 @@ class TasksScreen extends StatelessWidget {
     );
   }
 
+  void _addTask(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => const AddTaskDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tasks = context.watch<AppState>().tasks;
-
-    if (tasks.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.check_circle_outline,
-        message: 'No tasks yet.\nCreate reminders using your voice.',
-      );
-    }
 
     final sortedTasks = [...tasks]
       ..sort((a, b) {
@@ -40,16 +42,35 @@ class TasksScreen extends StatelessWidget {
         return b.priority.index.compareTo(a.priority.index);
       });
 
-    return ListView.builder(
-      padding: const EdgeInsets.only(top: 12, bottom: 100),
-      itemCount: sortedTasks.length,
-      itemBuilder: (context, index) {
-        final task = sortedTasks[index];
-        return _TaskTile(
-          task: task,
-          onEdit: () => _editTask(context, task),
-        );
-      },
+    return Stack(
+      children: [
+        if (tasks.isEmpty)
+          const _EmptyState(
+            icon: Icons.check_circle_outline,
+            message: 'No tasks yet.\nAdd reminders by voice or manually.',
+          )
+        else
+          ListView.builder(
+            padding: const EdgeInsets.only(top: 12, bottom: 100),
+            itemCount: sortedTasks.length,
+            itemBuilder: (context, index) {
+              final task = sortedTasks[index];
+              return _TaskTile(
+                task: task,
+                onEdit: () => _editTask(context, task),
+              );
+            },
+          ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FloatingActionButton(
+            onPressed: () => _addTask(context),
+            tooltip: 'Add task',
+            child: const Icon(Icons.add),
+          ),
+        ),
+      ],
     );
   }
 }

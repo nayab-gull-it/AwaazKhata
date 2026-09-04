@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:khata_app/providers/app_state.dart';
-import 'package:khata_app/screens/home_screen.dart';
+import 'package:khata_app/screens/splash_screen.dart';
 import 'package:khata_app/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 
@@ -24,7 +24,7 @@ class AwaazKhataApp extends StatelessWidget {
         title: 'AwaazKhata',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
-        home: const HomeScreen(),
+        home: const SplashScreen(),
       ),
     );
   }
