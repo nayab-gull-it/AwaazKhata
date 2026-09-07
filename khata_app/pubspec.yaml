@@ -56,6 +56,13 @@ dependencies:
   # Local key-value storage for the demo shop login session.
   shared_preferences: ^2.3.3
 
+  # Local NoSQL persistence for inventory, tasks, and udhaar records.
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Text-to-speech so voice query answers are also spoken aloud.
+  flutter_tts: ^4.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

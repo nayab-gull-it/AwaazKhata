@@ -4,19 +4,25 @@ import 'package:flutter/foundation.dart';
 import 'package:khata_app/models/inventory_item.dart';
 import 'package:khata_app/models/task.dart';
 import 'package:khata_app/models/udhaar_entry.dart';
+import 'package:khata_app/services/storage_service.dart';
 
 /// Holds the global application state for AwaazKhata.
 ///
 /// Manages inventory, tasks, and udhaar (credit) lists. Screens read from
 /// this provider and call its methods instead of manipulating data directly.
+///
+/// All mutations write through to [StorageService] (Hive) so data survives
+/// app restarts and force closes.
 class AppState extends ChangeNotifier {
   AppState() {
-    _loadDummyData();
+    _loadFromStorage();
   }
 
   final List<InventoryItem> _inventory = [];
   final List<Task> _tasks = [];
   final List<UdhaarEntry> _udhaar = [];
+
+  final StorageService _storage = StorageService.instance;
 
   /// Unmodifiable view of the inventory list.
   List<InventoryItem> get inventory => List.unmodifiable(_inventory);
@@ -44,9 +50,41 @@ class AppState extends ChangeNotifier {
     return _tasks.where((task) => !task.isCompleted).length;
   }
 
+  /// Loads persisted data on startup. If nothing has been saved yet, seeds
+  /// the realistic demo data so first-time users see a navigable UI.
+  void _loadFromStorage() {
+    _inventory.addAll(_storage.inventory);
+    _tasks.addAll(_storage.tasks);
+    _udhaar.addAll(_storage.udhaar);
+
+    if (_inventory.isEmpty && _tasks.isEmpty && _udhaar.isEmpty) {
+      _loadDummyData();
+      _persistAll();
+    }
+  }
+
+  void _persistInventory() {
+    _storage.saveInventory(_inventory);
+  }
+
+  void _persistTasks() {
+    _storage.saveTasks(_tasks);
+  }
+
+  void _persistUdhaar() {
+    _storage.saveUdhaar(_udhaar);
+  }
+
+  void _persistAll() {
+    _persistInventory();
+    _persistTasks();
+    _persistUdhaar();
+  }
+
   /// Adds a new inventory item, automatically recording the creation time.
   void addInventoryItem(InventoryItem item) {
     _inventory.add(item.copyWith(createdAt: DateTime.now()));
+    _persistInventory();
     notifyListeners();
   }
 
@@ -55,6 +93,7 @@ class AppState extends ChangeNotifier {
     final index = _inventory.indexWhere((item) => item.id == updatedItem.id);
     if (index != -1) {
       _inventory[index] = updatedItem;
+      _persistInventory();
       notifyListeners();
     }
   }
@@ -62,12 +101,14 @@ class AppState extends ChangeNotifier {
   /// Removes an inventory item by id.
   void removeInventoryItem(String id) {
     _inventory.removeWhere((item) => item.id == id);
+    _persistInventory();
     notifyListeners();
   }
 
   /// Adds a new task, automatically recording the creation time.
   void addTask(Task task) {
     _tasks.add(task.copyWith(createdAt: DateTime.now()));
+    _persistTasks();
     notifyListeners();
   }
 
@@ -76,6 +117,7 @@ class AppState extends ChangeNotifier {
     final index = _tasks.indexWhere((task) => task.id == updatedTask.id);
     if (index != -1) {
       _tasks[index] = updatedTask;
+      _persistTasks();
       notifyListeners();
     }
   }
@@ -86,6 +128,7 @@ class AppState extends ChangeNotifier {
     if (index != -1) {
       final task = _tasks[index];
       _tasks[index] = task.copyWith(isCompleted: !task.isCompleted);
+      _persistTasks();
       notifyListeners();
     }
   }
@@ -93,12 +136,14 @@ class AppState extends ChangeNotifier {
   /// Removes a task by id.
   void removeTask(String id) {
     _tasks.removeWhere((task) => task.id == id);
+    _persistTasks();
     notifyListeners();
   }
 
   /// Adds a new udhaar entry, automatically recording the creation time.
   void addUdhaar(UdhaarEntry entry) {
     _udhaar.add(entry.copyWith(createdAt: DateTime.now()));
+    _persistUdhaar();
     notifyListeners();
   }
 
@@ -107,6 +152,7 @@ class AppState extends ChangeNotifier {
     final index = _udhaar.indexWhere((entry) => entry.id == updatedEntry.id);
     if (index != -1) {
       _udhaar[index] = updatedEntry;
+      _persistUdhaar();
       notifyListeners();
     }
   }
@@ -120,6 +166,7 @@ class AppState extends ChangeNotifier {
         isPaid: true,
         paidAt: DateTime.now(),
       );
+      _persistUdhaar();
       notifyListeners();
     }
   }
@@ -127,6 +174,18 @@ class AppState extends ChangeNotifier {
   /// Removes an udhaar entry by id.
   void removeUdhaar(String id) {
     _udhaar.removeWhere((entry) => entry.id == id);
+    _persistUdhaar();
+    notifyListeners();
+  }
+
+  /// Clears all locally persisted records and in-memory lists.
+  ///
+  /// Used by the settings "clear old records" action.
+  Future<void> clearAllRecords() async {
+    _inventory.clear();
+    _tasks.clear();
+    _udhaar.clear();
+    await _storage.clearAll();
     notifyListeners();
   }
 
@@ -143,6 +202,23 @@ class AppState extends ChangeNotifier {
     final scored = <(double, UdhaarEntry)>[];
     for (final entry in _udhaar) {
       if (entry.isPaid) continue;
+      final score = _nameMatchScore(name, entry.customerName);
+      if (score >= 0.75) scored.add((score, entry));
+    }
+    scored.sort((a, b) {
+      final byScore = b.$1.compareTo(a.$1);
+      if (byScore != 0) return byScore;
+      return b.$2.createdAt.compareTo(a.$2.createdAt);
+    });
+    return [for (final match in scored) match.$2];
+  }
+
+  /// Finds ALL udhaar entries (settled included) whose customer name closely
+  /// matches [name], newest first. Used by the per-client ledger screen to
+  /// show a customer's full transaction history.
+  List<UdhaarEntry> findUdhaarHistory(String name) {
+    final scored = <(double, UdhaarEntry)>[];
+    for (final entry in _udhaar) {
       final score = _nameMatchScore(name, entry.customerName);
       if (score >= 0.75) scored.add((score, entry));
     }

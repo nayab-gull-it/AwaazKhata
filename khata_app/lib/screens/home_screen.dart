@@ -5,6 +5,7 @@ import 'package:khata_app/models/parsed_action.dart';
 import 'package:khata_app/models/task.dart';
 import 'package:khata_app/models/udhaar_entry.dart';
 import 'package:khata_app/providers/app_state.dart';
+import 'package:khata_app/screens/dashboard_screen.dart';
 import 'package:khata_app/screens/inventory_screen.dart';
 import 'package:khata_app/screens/login_screen.dart';
 import 'package:khata_app/screens/tasks_screen.dart';
@@ -237,10 +238,85 @@ class _HomeScreenState extends State<HomeScreen> {
       case VoiceActionType.queryInventoryCount:
         _answerInventoryCountQuery(appState);
 
+      case VoiceActionType.queryTransactionsByDate:
+        _answerTransactionsByDateQuery(action, appState);
+
       default:
         break;
     }
   }
+
+  /// Date-wise transaction lookup: lists every udhaar entry recorded or
+  /// settled on the requested date so the shopkeeper can recall what
+  /// happened that day.
+  void _answerTransactionsByDateQuery(ParsedAction action, AppState appState) {
+    const icon = Icons.history_outlined;
+    const title = 'Transactions by Date';
+    final queryDate = action.queryDate;
+
+    if (queryDate == null) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: "Couldn't hear a date in that command",
+      );
+      return;
+    }
+
+    final day = DateTime(queryDate.year, queryDate.month, queryDate.day);
+    final matches = appState.udhaar.where((entry) {
+      final recorded = DateTime(
+        entry.createdAt.year,
+        entry.createdAt.month,
+        entry.createdAt.day,
+      );
+      final settled = entry.paidAt == null
+          ? null
+          : DateTime(
+              entry.paidAt!.year,
+              entry.paidAt!.month,
+              entry.paidAt!.day,
+            );
+      return recorded == day || settled == day;
+    }).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (matches.isEmpty) {
+      VoiceAnswerDialog.show(
+        context,
+        icon: icon,
+        title: title,
+        headline: 'No transactions found on ${_fmtDay(day)}',
+      );
+      return;
+    }
+
+    VoiceAnswerDialog.show(
+      context,
+      icon: icon,
+      title: title,
+      headline:
+          '${matches.length} ${matches.length == 1 ? 'transaction' : 'transactions'} '
+          'on ${_fmtDay(day)}',
+      rows: [
+        for (final entry in matches)
+          VoiceAnswerRow(
+            title: entry.customerName,
+            subtitle: entry.isPaid
+                ? 'Paid Rs. ${_fmtRs(entry.amount)}'
+                : 'Recorded Rs. ${_fmtRs(entry.amount)} udhaar',
+          ),
+      ],
+    );
+  }
+
+  String _fmtDay(DateTime date) => '${date.day} ${_monthName(date.month)}';
+
+  String _monthName(int month) => const [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ][month - 1];
 
   /// Balance lookup: single match shows the amount, multiple matches list
   /// every close-name customer with their balance so the shopkeeper can
@@ -579,6 +655,7 @@ class _HomeScreenState extends State<HomeScreen> {
             title: action.title ?? 'New Task',
             description: action.description,
             createdAt: DateTime.now(),
+            dueAt: action.dueAt,
             priority: action.priority,
           ),
         );
@@ -590,7 +667,8 @@ class _HomeScreenState extends State<HomeScreen> {
            VoiceActionType.queryItemStock ||
            VoiceActionType.queryItemPrice ||
            VoiceActionType.queryLowStock ||
-           VoiceActionType.queryInventoryCount:
+           VoiceActionType.queryInventoryCount ||
+           VoiceActionType.queryTransactionsByDate:
         // Query actions are answered by _answerQuery before the
         // confirmation dialog is ever shown; answering here too keeps
         // this path correct if it is ever reached.
@@ -669,6 +747,45 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),
           ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (confirmContext) => AlertDialog(
+                  title: const Text('Clear Old Records'),
+                  content: const Text(
+                    'This will permanently delete all inventory, tasks, '
+                    'and udhaar records from this device. '
+                    'Your shop login will stay logged in.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(confirmContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(confirmContext).pop(true),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.error,
+                      ),
+                      child: const Text('Clear'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true && mounted) {
+                await context.read<AppState>().clearAllRecords();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('All records cleared')),
+                  );
+                }
+              }
+            },
+            child: const Text('Clear old data'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.error,
@@ -703,6 +820,15 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
         actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DashboardScreen()),
+              );
+            },
+            icon: const Icon(Icons.assessment_outlined),
+            tooltip: 'Dashboard',
+          ),
           if (_isProcessing)
             const Padding(
               padding: EdgeInsets.only(right: 16),

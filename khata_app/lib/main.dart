@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:khata_app/providers/app_state.dart';
 import 'package:khata_app/screens/splash_screen.dart';
+import 'package:khata_app/services/storage_service.dart';
 import 'package:khata_app/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await StorageService.instance.initialize();
   runApp(const AwaazKhataApp());
 }
 

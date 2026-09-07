@@ -60,4 +60,30 @@ class UdhaarEntry {
       paidAt: paidAt ?? this.paidAt,
     );
   }
+
+  /// Serializes this entry to JSON for local persistence.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'customerName': customerName,
+        'phoneNumber': phoneNumber,
+        'amount': amount,
+        'description': description,
+        'createdAt': createdAt.toIso8601String(),
+        'isPaid': isPaid,
+        'paidAt': paidAt?.toIso8601String(),
+      };
+
+  /// Deserializes an entry from JSON stored by [toJson].
+  factory UdhaarEntry.fromJson(Map<String, dynamic> json) => UdhaarEntry(
+        id: json['id'] as String,
+        customerName: json['customerName'] as String,
+        phoneNumber: json['phoneNumber'] as String? ?? '',
+        amount: (json['amount'] as num).toDouble(),
+        description: json['description'] as String?,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+        isPaid: json['isPaid'] as bool? ?? false,
+        paidAt: json['paidAt'] == null
+            ? null
+            : DateTime.parse(json['paidAt'] as String),
+      );
 }

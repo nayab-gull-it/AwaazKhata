@@ -13,6 +13,8 @@ class UdhaarCard extends StatelessWidget {
     this.onMarkPaid,
     this.onCall,
     this.onEdit,
+    this.onDelete,
+    this.onShare,
     super.key,
   });
 
@@ -20,12 +22,20 @@ class UdhaarCard extends StatelessWidget {
   final VoidCallback? onMarkPaid;
   final VoidCallback? onCall;
   final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onShare;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dateFormat = DateFormat('d MMM, h:mm a');
     final hasPhone = entry.phoneNumber.trim().isNotEmpty;
+    final recentDate = entry.isPaid && entry.paidAt != null
+        ? entry.paidAt!
+        : entry.createdAt;
+    final recentDateLabel = entry.isPaid && entry.paidAt != null
+        ? 'Settled on'
+        : 'Recorded on';
 
     return Card(
       child: Padding(
@@ -75,7 +85,7 @@ class UdhaarCard extends StatelessWidget {
                 Expanded(
                   child: _InfoRow(
                     icon: Icons.calendar_today_outlined,
-                    text: dateFormat.format(entry.createdAt),
+                    text: '$recentDateLabel ${dateFormat.format(recentDate)}',
                   ),
                 ),
               ],
@@ -104,6 +114,23 @@ class UdhaarCard extends StatelessWidget {
                       tooltip: hasPhone ? 'Call customer' : 'No phone number saved',
                       color: hasPhone ? AppTheme.greenAccent : AppTheme.textSecondary,
                     ),
+                    if (onShare != null)
+                      IconButton(
+                        onPressed: hasPhone ? onShare : null,
+                        icon: const Icon(Icons.share_outlined),
+                        tooltip: hasPhone
+                            ? 'Share bill on WhatsApp'
+                            : 'No phone number saved',
+                        color:
+                            hasPhone ? AppTheme.greenAccent : AppTheme.textSecondary,
+                      ),
+                    if (onDelete != null)
+                      IconButton(
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: 'Delete udhaar',
+                        color: AppTheme.error,
+                      ),
                   ],
                 ),
               ],

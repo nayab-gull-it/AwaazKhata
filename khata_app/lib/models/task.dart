@@ -54,6 +54,32 @@ class Task {
       priority: priority ?? this.priority,
     );
   }
+
+  /// Serializes this task to JSON for local persistence.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'description': description,
+        'createdAt': createdAt.toIso8601String(),
+        'dueAt': dueAt?.toIso8601String(),
+        'isCompleted': isCompleted,
+        'priority': priority.name,
+      };
+
+  /// Deserializes a task from JSON stored by [toJson].
+  factory Task.fromJson(Map<String, dynamic> json) => Task(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        description: json['description'] as String?,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+        dueAt: json['dueAt'] == null
+            ? null
+            : DateTime.parse(json['dueAt'] as String),
+        isCompleted: json['isCompleted'] as bool? ?? false,
+        priority: TaskPriority.values.byName(
+          (json['priority'] as String?) ?? 'normal',
+        ),
+      );
 }
 
 /// Importance levels for tasks.

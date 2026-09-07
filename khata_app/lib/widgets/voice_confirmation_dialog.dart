@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:khata_app/models/inventory_item.dart';
 import 'package:khata_app/models/parsed_action.dart';
+import 'package:khata_app/models/task.dart';
 import 'package:khata_app/models/udhaar_entry.dart';
 import 'package:khata_app/theme/app_theme.dart';
+import 'package:khata_app/widgets/date_time_picker_field.dart';
 
 /// Outcome of a confirmed voice command.
 ///
@@ -79,10 +82,17 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
   late final TextEditingController _amountController;
   late final TextEditingController _purchasePriceController;
   late final TextEditingController _salePriceController;
+  late final TextEditingController _taskTitleController;
 
   /// Currently chosen radio value: an [UdhaarEntry], an [InventoryItem],
   /// [_createNew], or null while no option is selected.
   Object? _target;
+
+  /// Editable task due date, if the user set one.
+  DateTime? _taskDueAt;
+
+  /// Editable task priority.
+  late TaskPriority _taskPriority;
 
   UdhaarEntry? get _selectedUdhaar =>
       _target is UdhaarEntry ? _target as UdhaarEntry : null;
@@ -107,6 +117,11 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
     _salePriceController = TextEditingController(
       text: widget.action.salePrice?.toString() ?? '',
     );
+    _taskTitleController = TextEditingController(
+      text: widget.action.title ?? '',
+    );
+    _taskDueAt = widget.action.dueAt;
+    _taskPriority = widget.action.priority;
 
     // A single close match pre-selects "update existing"; multiple matches
     // start unselected so the user must pick one.
@@ -126,6 +141,7 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
     _amountController.dispose();
     _purchasePriceController.dispose();
     _salePriceController.dispose();
+    _taskTitleController.dispose();
     super.dispose();
   }
 
@@ -169,6 +185,13 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
         widget.action.type == VoiceActionType.reduceUdhaar) {
       final amt = double.tryParse(_amountController.text.trim());
       if (amt != null) overrides['amount'] = amt;
+    }
+
+    if (widget.action.type == VoiceActionType.addTask) {
+      final title = _taskTitleController.text.trim();
+      if (title.isNotEmpty) overrides['title'] = title;
+      if (_taskDueAt != null) overrides['due_at'] = _taskDueAt!.toIso8601String();
+      overrides['priority'] = _taskPriority.name;
     }
 
     return widget.action.copyWithField(overrides);
@@ -247,7 +270,8 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
       VoiceActionType.queryItemStock ||
       VoiceActionType.queryItemPrice ||
       VoiceActionType.queryLowStock ||
-      VoiceActionType.queryInventoryCount =>
+      VoiceActionType.queryInventoryCount ||
+      VoiceActionType.queryTransactionsByDate =>
         _buildQueryPlaceholderBody(action),
       VoiceActionType.navigate => _buildNavigateBody(action),
       VoiceActionType.unknown => _buildUnknownBody(),
@@ -465,13 +489,56 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
       value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
 
   Widget _buildTaskBody(ParsedAction action) {
+    final dateFormat = DateFormat('d MMM, h:mm a');
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ReadOnlyField(label: 'Title', value: action.title ?? '—'),
-        if (action.description != null)
+        TextField(
+          controller: _taskTitleController,
+          decoration: const InputDecoration(
+            labelText: 'Task name',
+            border: OutlineInputBorder(),
+          ),
+          textInputAction: TextInputAction.done,
+        ),
+        const SizedBox(height: 12),
+        DateTimePickerField(
+          label: _taskDueAt == null ? 'Add reminder time (optional)' : 'Due',
+          dateTime: _taskDueAt,
+          format: dateFormat,
+          allowClear: true,
+          onChanged: (value) => setState(() => _taskDueAt = value),
+        ),
+        const SizedBox(height: 12),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Priority',
+            border: OutlineInputBorder(),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<TaskPriority>(
+              value: _taskPriority,
+              isDense: true,
+              items: TaskPriority.values
+                  .map(
+                    (p) => DropdownMenuItem(
+                      value: p,
+                      child: Text(
+                          p.name[0].toUpperCase() + p.name.substring(1)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) setState(() => _taskPriority = value);
+              },
+            ),
+          ),
+        ),
+        if (action.description != null) ...[
+          const SizedBox(height: 12),
           _ReadOnlyField(label: 'Description', value: action.description!),
+        ],
       ],
     );
   }
@@ -537,6 +604,7 @@ class _VoiceConfirmationDialogState extends State<VoiceConfirmationDialog> {
       VoiceActionType.queryItemPrice => Icons.local_offer_outlined,
       VoiceActionType.queryLowStock => Icons.warning_amber_outlined,
       VoiceActionType.queryInventoryCount => Icons.calculate_outlined,
+      VoiceActionType.queryTransactionsByDate => Icons.history_outlined,
       VoiceActionType.navigate => Icons.open_in_new,
       VoiceActionType.unknown => Icons.help_outline,
     };

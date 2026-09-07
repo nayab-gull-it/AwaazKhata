@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
+from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,9 +93,10 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
    - "query_balance"  — user is ASKING how much is owed/to-pay for a CUSTOMER (a QUESTION, not a write)
    - "query_item_stock" — user is ASKING whether a PRODUCT exists in stock / how much of it is in stock
    - "query_item_price" — user is ASKING the PRICE of a PRODUCT
-   - "query_low_stock" — user is ASKING WHICH items/products are low on stock
-   - "query_inventory_count" — user is ASKING HOW MANY items/products exist in total
-   - "add_inventory"  — user wants to add/stock a product (no customer involved)
+    - "query_low_stock" — user is ASKING WHICH items/products are low on stock
+    - "query_inventory_count" — user is ASKING HOW MANY items/products exist in total
+    - "query_transactions_by_date" — user is ASKING which udhaar/transactions happened on a specific date
+    - "add_inventory"  — user wants to add/stock a product (no customer involved)
    - "add_udhaar"     — user wants to RECORD NEW credit for a customer (the amount they owe goes UP)
    - "reduce_udhaar"  — customer PAID BACK — user wants to REDUCE/settle an existing credit (the amount they owe goes DOWN)
    - "add_task"       — user wants to create a reminder or to-do
@@ -143,11 +145,25 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
        English phrase "low stock".
        No extra fields — the app lists its own low-stock items.
 
-   (f) query_inventory_count — asking HOW MANY items exist in total:
-       Trigger for total-count questions: "total kitne item hain", \
-       "inventory mein kitne products hain", "how many items do I have". \
-       Look for "total" or "kitne" together with item/product words.
-       No extra fields — the app counts its own inventory.
+    (f) query_inventory_count — asking HOW MANY items exist in total:
+        Trigger for total-count questions: "total kitne item hain", \
+        "inventory mein kitne products hain", "how many items do I have". \
+        Look for "total" or "kitne" together with item/product words.
+        No extra fields — the app counts its own inventory.
+
+    (f2) query_transactions_by_date — asking WHAT transactions/udhaar entries \
+        happened on a specific date:
+        Trigger when the user asks about transactions, udhaar entries, or \
+        activity tied to a DATE: "5 tareekh ko kaun se udhaar hue", \
+        "aaj kitne udhaar hue", "kal ke transactions batao", \
+        "3 September ka hisab dikhao", "what transactions on 5 Sep". \
+        Look for date words ("tareekh", "date", "aaj", "kal", month names) \
+        combined with udhaar/transaction words AND a question/listing intent \
+        ("kaun", "kitne", "batao", "dikhao", "show", "list").
+        This is a READ question — do NOT use it for add/reduce commands that \
+        merely mention a date. Output "date" as YYYY-MM-DD.
+        If only a day number is given, use the current month. "aaj" means \
+        today; "kal" (asking about past activity) means yesterday.
 
    (g) add_task:
        Trigger when the transcript is about a REMINDER, TO-DO, or FUTURE ACTION.
@@ -204,10 +220,13 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
    query_low_stock:
      (no extra fields)
 
-   query_inventory_count:
-     (no extra fields)
+    query_inventory_count:
+      (no extra fields)
 
-   add_inventory:
+    query_transactions_by_date:
+      "date" (string, required — the transaction date as YYYY-MM-DD)
+
+    add_inventory:
      "name" (string), "quantity" (integer), "unit" (string, e.g. "pcs", "kg", \
 "bottle", "pack"), "category" (string), "purchase_price" (number), \
 "sale_price" (number)
@@ -347,6 +366,23 @@ Transcript: "kitne item total hain"
 
 Transcript: "how many items do I have"
 {"action":"query_inventory_count"}
+
+=== query_transactions_by_date (WHAT happened on a date — a read question) ===
+
+Transcript: "5 tareekh ko kaun se udhaar hue"
+{"action":"query_transactions_by_date","date":"2026-09-05"}
+
+Transcript: "aaj kitne udhaar hue"
+{"action":"query_transactions_by_date","date":"2026-09-07"}
+
+Transcript: "kal ke transactions batao"
+{"action":"query_transactions_by_date","date":"2026-09-06"}
+
+Transcript: "3 September ka hisab dikhao"
+{"action":"query_transactions_by_date","date":"2026-09-03"}
+
+Transcript: "what transactions happened on 5 Sep"
+{"action":"query_transactions_by_date","date":"2026-09-05"}
 
 === add_udhaar (RECORD credit/debt — customer + amount + write intent) ===
 
@@ -606,6 +642,36 @@ def _keyword_fallback(transcript: str) -> dict:
     tokens = [tok.strip(".,!?;:") for tok in re.findall(r"[\w']+", t, re.UNICODE)]
     tok_set = set(tokens)
 
+    # Date-wise transaction question — "3 September ka hisab dikhao",
+    # "5 tareekh ko kaun se udhaar hue". Checked FIRST because nav verbs
+    # ("dikhao") + hisab words ("hisab") would otherwise classify it as
+    # navigate. The guard requires a date word + transaction word + a
+    # question/listing intent, so plain navigation ("inventory dikhao"),
+    # write commands that mention a date ("aaj Sara ne 400 wapas kiye"),
+    # and tasks with "kal" ("kal subah dukaan kholna hai") are unaffected.
+    date_words = {
+        "tareekh", "tarikh", "date", "aaj", "kal", "parso",
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sept",
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+    }
+    transaction_words = {
+        "udhaar", "khata", "khate", "hisab", "hisaab", "transaction",
+        "transactions", "credit", "payment", "payments",
+    }
+    listing_words = {
+        "kaun", "kaunse", "kaunsi", "kitne", "kitna", "batao", "bata",
+        "dikhao", "dikha", "show", "list",
+    }
+    if (date_words & tok_set) and (transaction_words & tok_set) and (
+        listing_words & tok_set
+    ):
+        parsed_date = _extract_transcript_date(transcript, date.today())
+        return {
+            "action": "query_transactions_by_date",
+            "date": parsed_date,
+        }
+
     # Navigation (must come first — "inventory dikhao" should not become add_inventory)
     nav_verbs = {"dikhao", "dikha", "kholo", "open", "go", "jao", "show"}
     if nav_verbs & tok_set:
@@ -748,6 +814,52 @@ def _keyword_fallback(transcript: str) -> dict:
         }
 
     return {"action": "unknown"}
+
+
+def _extract_transcript_date(transcript: str, today: date | None = None) -> str:
+    """Pull a calendar date out of a transcript and return it as YYYY-MM-DD.
+
+    Handles "aaj" (today), "kal"/"parso" (yesterday when asking about past
+    activity), and a day number with an optional month name ("5 tareekh",
+    "3 September"). Falls back to today when nothing recognizable is found.
+    """
+    today = today or date.today()
+    t = transcript.lower()
+
+    if "aaj" in t:
+        return today.isoformat()
+    if "kal" in t or "parso" in t:
+        from datetime import timedelta
+
+        return (today - timedelta(days=1)).isoformat()
+
+    month_names = {
+        "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3,
+        "march": 3, "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6,
+        "jul": 7, "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9,
+        "september": 9, "oct": 10, "october": 10, "nov": 11,
+        "november": 11, "dec": 12, "december": 12,
+    }
+    month = None
+    for name, num in month_names.items():
+        if re.search(rf"\b{name}\b", t):
+            month = num
+            break
+
+    day = None
+    match = re.search(r"\b(\d{1,2})\b", t)
+    if match:
+        candidate = int(match.group(1))
+        if 1 <= candidate <= 31:
+            day = candidate
+
+    if day is None:
+        return today.isoformat()
+
+    try:
+        return date(today.year, month or today.month, day).isoformat()
+    except ValueError:
+        return today.isoformat()
 
 
 def _extract_number(text: str) -> int | float | None:

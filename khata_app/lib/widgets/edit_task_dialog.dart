@@ -159,7 +159,9 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
               label: 'Created at',
               dateTime: _createdAt,
               format: dateFormat,
-              onChanged: (value) => setState(() => _createdAt = value),
+              onChanged: (value) {
+                if (value != null) setState(() => _createdAt = value);
+              },
             ),
             const SizedBox(height: 12),
             InkWell(

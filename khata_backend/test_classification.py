@@ -158,6 +158,21 @@ CASES = [
     ("total kitne item hain", "query_inventory_count", None),
     ("inventory mein kitne products hain", "query_inventory_count", None),
 
+    # query_transactions_by_date — date-wise transaction read questions
+    (
+        "5 tareekh ko kaun se udhaar hue",
+        "query_transactions_by_date",
+        lambda r: len(r.get("date", "")) == 10 and r["date"].endswith("-05"),
+    ),
+    ("aaj kitne udhaar hue", "query_transactions_by_date", None),
+    ("kal ke transactions batao", "query_transactions_by_date", None),
+    ("3 September ka hisab dikhao", "query_transactions_by_date", None),
+
+    # Regression guards: dates mentioned inside write/task commands must
+    # not be swallowed by the date-query branch.
+    ("aaj Sara ne 400 wapas kiye hisab mein minus kar do", "reduce_udhaar", None),
+    ("kal subah 9 baje dukaan kholna hai", "add_task", None),
+
     # Boundary cases — make sure we didn't regress
     ("Ahmed ka udhaar 500 rupaye likho", "add_udhaar", None),
     ("paanch bottle tel add karo", "add_inventory", None),

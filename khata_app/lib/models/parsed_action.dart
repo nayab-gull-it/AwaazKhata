@@ -72,6 +72,15 @@ class ParsedAction {
   /// Convenience getter for the `description` field.
   String? get description => fields['description'] as String?;
 
+  /// Convenience getter for the `due_at` field as a [DateTime].
+  DateTime? get dueAt {
+    final raw = fields['due_at'];
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    if (raw is String) return DateTime.tryParse(raw);
+    return null;
+  }
+
   /// Convenience getter for the `title` field.
   String? get title => fields['title'] as String?;
 
@@ -133,7 +142,17 @@ class ParsedAction {
       type == VoiceActionType.queryItemStock ||
       type == VoiceActionType.queryItemPrice ||
       type == VoiceActionType.queryLowStock ||
-      type == VoiceActionType.queryInventoryCount;
+      type == VoiceActionType.queryInventoryCount ||
+      type == VoiceActionType.queryTransactionsByDate;
+
+  /// The requested transaction date (YYYY-MM-DD) for date-wise queries.
+  DateTime? get queryDate {
+    final raw = fields['date'];
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    if (raw is String) return DateTime.tryParse(raw);
+    return null;
+  }
 }
 
 /// Types of action the backend can parse from a voice command.
@@ -147,6 +166,7 @@ enum VoiceActionType {
   queryItemPrice,
   queryLowStock,
   queryInventoryCount,
+  queryTransactionsByDate,
   navigate,
   unknown;
 
@@ -161,6 +181,7 @@ enum VoiceActionType {
       'query_item_price' => queryItemPrice,
       'query_low_stock' => queryLowStock,
       'query_inventory_count' => queryInventoryCount,
+      'query_transactions_by_date' => queryTransactionsByDate,
       'navigate' => navigate,
       _ => unknown,
     };
@@ -177,6 +198,7 @@ enum VoiceActionType {
         queryItemPrice => 'Item Price',
         queryLowStock => 'Low Stock Items',
         queryInventoryCount => 'Inventory Count',
+        queryTransactionsByDate => 'Transactions by Date',
         navigate => 'Navigate',
         unknown => 'Unrecognized Command',
       };

@@ -167,7 +167,9 @@ class _EditInventoryDialogState extends State<EditInventoryDialog> {
               label: 'Added on',
               dateTime: _createdAt,
               format: dateFormat,
-              onChanged: (value) => setState(() => _createdAt = value),
+              onChanged: (value) {
+                if (value != null) setState(() => _createdAt = value);
+              },
             ),
           ],
         ),

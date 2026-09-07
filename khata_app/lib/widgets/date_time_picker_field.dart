@@ -9,18 +9,22 @@ class DateTimePickerField extends StatelessWidget {
     required this.dateTime,
     required this.format,
     required this.onChanged,
+    this.allowClear = false,
     super.key,
   });
 
   final String label;
-  final DateTime dateTime;
+  final DateTime? dateTime;
   final DateFormat format;
-  final ValueChanged<DateTime> onChanged;
+  final ValueChanged<DateTime?> onChanged;
+  final bool allowClear;
 
   Future<void> _pickDateTime(BuildContext context) async {
+    final now = DateTime.now();
+    final initialDate = dateTime ?? now;
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: dateTime,
+      initialDate: initialDate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
     );
@@ -29,7 +33,7 @@ class DateTimePickerField extends StatelessWidget {
 
     final pickedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(dateTime),
+      initialTime: TimeOfDay.fromDateTime(initialDate),
     );
 
     if (pickedTime == null || !context.mounted) return;
@@ -47,14 +51,28 @@ class DateTimePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final value = dateTime;
     return InkWell(
       onTap: () => _pickDateTime(context),
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          suffixIcon: const Icon(Icons.calendar_today_outlined),
+          suffixIcon: allowClear && value != null
+              ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  tooltip: 'Clear',
+                  onPressed: () => onChanged(null),
+                )
+              : const Icon(Icons.calendar_today_outlined),
         ),
-        child: Text(format.format(dateTime)),
+        child: Text(
+          value == null ? 'Tap to set' : format.format(value),
+          style: TextStyle(
+            color: value == null
+                ? Theme.of(context).hintColor
+                : Theme.of(context).textTheme.bodyLarge?.color,
+          ),
+        ),
       ),
     );
   }

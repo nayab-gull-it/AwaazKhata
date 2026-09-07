@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:khata_app/services/tts_service.dart';
 import 'package:khata_app/theme/app_theme.dart';
 
 /// One list entry shown in a [VoiceAnswerDialog], e.g. a matching
@@ -16,7 +19,11 @@ class VoiceAnswerRow {
 /// it just states the answer (headline plus optional detail lines and
 /// a list of result rows) and offers a single Close action, so the
 /// shopkeeper gets an immediate answer without any extra taps.
-class VoiceAnswerDialog extends StatelessWidget {
+///
+/// The headline (and, when present, the row subtitles) are also spoken
+/// aloud via [TtsService], so the answer is heard as well as read.
+/// Speech is cancelled when the dialog is dismissed.
+class VoiceAnswerDialog extends StatefulWidget {
   const VoiceAnswerDialog({
     required this.icon,
     required this.title,
@@ -62,13 +69,40 @@ class VoiceAnswerDialog extends StatelessWidget {
   }
 
   @override
+  State<VoiceAnswerDialog> createState() => _VoiceAnswerDialogState();
+}
+
+class _VoiceAnswerDialogState extends State<VoiceAnswerDialog> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_speakAnswer());
+  }
+
+  @override
+  void dispose() {
+    unawaited(TtsService.instance.stop());
+    super.dispose();
+  }
+
+  /// Builds the spoken text: headline, detail lines, then row summaries.
+  Future<void> _speakAnswer() async {
+    final parts = <String>[widget.headline];
+    parts.addAll(widget.details);
+    for (final row in widget.rows) {
+      parts.add('${row.title}. ${row.subtitle}');
+    }
+    await TtsService.instance.speak(parts.join('. '));
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Row(
         children: [
-          Icon(icon, color: AppTheme.navy),
+          Icon(widget.icon, color: AppTheme.navy),
           const SizedBox(width: 8),
-          Expanded(child: Text(title)),
+          Expanded(child: Text(widget.title)),
         ],
       ),
       content: SingleChildScrollView(
@@ -77,14 +111,14 @@ class VoiceAnswerDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              headline,
+              widget.headline,
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
                 color: AppTheme.textPrimary,
               ),
             ),
-            for (final detail in details)
+            for (final detail in widget.details)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
@@ -95,10 +129,10 @@ class VoiceAnswerDialog extends StatelessWidget {
                   ),
                 ),
               ),
-            if (rows.isNotEmpty) ...[
+            if (widget.rows.isNotEmpty) ...[
               const SizedBox(height: 12),
               const Divider(height: 1),
-              for (final row in rows)
+              for (final row in widget.rows)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
