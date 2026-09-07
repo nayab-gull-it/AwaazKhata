@@ -33,10 +33,19 @@ class _LoginScreenState extends State<LoginScreen> {
     if (shopName.isEmpty || _saving) return;
 
     setState(() => _saving = true);
-    await SessionService.saveShop(
-      shopName: shopName,
-      shopPhone: _phoneController.text.trim(),
-    );
+    debugPrint('[LoginScreen] _submit saving shopName="$shopName"');
+    try {
+      await SessionService.saveShop(
+        shopName: shopName,
+        shopPhone: _phoneController.text.trim(),
+      );
+      debugPrint('[LoginScreen] _submit save complete');
+    } catch (e, stackTrace) {
+      debugPrint('[LoginScreen] _submit save failed: $e');
+      debugPrintStack(stackTrace: stackTrace, label: '[LoginScreen]');
+      setState(() => _saving = false);
+      return;
+    }
     if (!mounted) return;
 
     Navigator.of(context).pushReplacement(

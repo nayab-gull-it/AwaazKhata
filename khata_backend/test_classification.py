@@ -43,6 +43,35 @@ CASES = [
         or "chini" in r.get("title", "").lower(),
     ),
 
+    # add_task priority — urgent phrasings should map to high
+    (
+        "urgent kaam hai, subah 9 baje uthna hai",
+        "add_task",
+        lambda r: r.get("priority") == "high",
+    ),
+    (
+        "jaldi karna hai, abhi call karna hai Ahmad ko",
+        "add_task",
+        lambda r: r.get("priority") == "high",
+    ),
+    (
+        "zaroori kaam hai, foran supplier se baat karo",
+        "add_task",
+        lambda r: r.get("priority") == "high",
+    ),
+
+    # add_task priority — non-urgent phrasings should stay normal
+    (
+        "kal subah 9 baje dukaan kholna hai",
+        "add_task",
+        lambda r: r.get("priority") == "normal",
+    ),
+    (
+        "shaam ko supplier ko call karna yaad dilao",
+        "add_task",
+        lambda r: r.get("priority") == "normal",
+    ),
+
     # query_balance — the new action type
     (
         "Ahmad ka kitna baaki hai",
@@ -122,7 +151,10 @@ CASES = [
         lambda r: r.get("name", "").lower().startswith("tapal"),
     ),
     ("kaunse item ka stock kam hai", "query_low_stock", None),
+    ("kaunse item ka low stock hai", "query_low_stock", None),
     ("kitne items low stock mein hain", "query_low_stock", None),
+    ("low stock items batao", "query_low_stock", None),
+    ("stock kam hai kaunse item ka", "query_low_stock", None),
     ("total kitne item hain", "query_inventory_count", None),
     ("inventory mein kitne products hain", "query_inventory_count", None),
 

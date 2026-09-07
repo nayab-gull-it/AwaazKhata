@@ -24,14 +24,20 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _start() async {
-    final loggedIn = await SessionService.isLoggedIn();
-    if (!mounted) return;
+    try {
+      final loggedIn = await SessionService.isLoggedIn();
+      debugPrint('[SplashScreen] isLoggedIn=$loggedIn');
+      if (!mounted) return;
 
-    if (loggedIn) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-      return;
+      if (loggedIn) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+        return;
+      }
+    } catch (e, stackTrace) {
+      debugPrint('[SplashScreen] isLoggedIn failed: $e');
+      debugPrintStack(stackTrace: stackTrace, label: '[SplashScreen]');
     }
 
     await Future<void>.delayed(const Duration(seconds: 2));

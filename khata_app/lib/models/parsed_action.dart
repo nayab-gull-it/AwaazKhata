@@ -1,3 +1,5 @@
+import 'package:khata_app/models/task.dart';
+
 /// Structured action returned by the backend after parsing a voice command.
 ///
 /// The backend (not the Flutter app) runs Qwen and decides what the user
@@ -72,6 +74,18 @@ class ParsedAction {
 
   /// Convenience getter for the `title` field.
   String? get title => fields['title'] as String?;
+
+  /// Convenience getter for the `priority` field as a [TaskPriority].
+  TaskPriority get priority {
+    final raw = fields['priority'];
+    if (raw == null) return TaskPriority.normal;
+    final normalized = raw.toString().toLowerCase();
+    return switch (normalized) {
+      'high' || 'urgent' => TaskPriority.high,
+      'low' => TaskPriority.low,
+      _ => TaskPriority.normal,
+    };
+  }
 
   /// Convenience getter for the `purchase_price` field as a double.
   double? get purchasePrice {

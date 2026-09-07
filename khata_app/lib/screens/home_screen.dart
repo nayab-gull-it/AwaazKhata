@@ -218,6 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Answers a query-type action directly with a read-only dialog.
   void _answerQuery(ParsedAction action) {
+    debugPrint('[HomeScreen] answering query action=${action.type}');
     final appState = context.read<AppState>();
 
     switch (action.type) {
@@ -578,9 +579,11 @@ class _HomeScreenState extends State<HomeScreen> {
             title: action.title ?? 'New Task',
             description: action.description,
             createdAt: DateTime.now(),
+            priority: action.priority,
           ),
         );
-        _showMessage('Created task "${action.title}"');
+        _showMessage('Created ${action.priority.name} priority task '
+            '"${action.title}"');
         _switchToTab(1);
 
       case VoiceActionType.queryBalance ||

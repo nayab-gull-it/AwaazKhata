@@ -25,6 +25,7 @@ class UdhaarCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dateFormat = DateFormat('d MMM, h:mm a');
+    final hasPhone = entry.phoneNumber.trim().isNotEmpty;
 
     return Card(
       child: Padding(
@@ -98,10 +99,10 @@ class UdhaarCard extends StatelessWidget {
                         child: const Text('Mark Paid'),
                       ),
                     IconButton(
-                      onPressed: onCall,
+                      onPressed: hasPhone ? onCall : null,
                       icon: const Icon(Icons.call_outlined),
-                      tooltip: 'Call customer',
-                      color: AppTheme.greenAccent,
+                      tooltip: hasPhone ? 'Call customer' : 'No phone number saved',
+                      color: hasPhone ? AppTheme.greenAccent : AppTheme.textSecondary,
                     ),
                   ],
                 ),

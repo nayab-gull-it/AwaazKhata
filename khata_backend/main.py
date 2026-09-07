@@ -136,9 +136,11 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
 
    (e) query_low_stock — asking WHICH items are low on stock:
        Trigger for questions about items running low: "kaunse item ka stock kam hai", \
-       "kitne items low stock mein hain", "kaun si cheez kam hai", \
-       "which items are running low". Look for "kam"/"low" together with \
-       item/stock words.
+       "kaunse item ka low stock hai", "kitne items low stock mein hain", \
+       "low stock items batao", "stock kam hai kaunse item ka", \
+       "kaun si cheez kam hai", "which items are running low". \
+       Look for "kam"/"low" together with item/stock words, or the exact \
+       English phrase "low stock".
        No extra fields — the app lists its own low-stock items.
 
    (f) query_inventory_count — asking HOW MANY items exist in total:
@@ -154,6 +156,9 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
        references, or any phrasing that asks someone to DO something later.
        The presence of a product name does NOT make it inventory — if the sentence \
        is about restocking, checking, or remembering, it is a task.
+       Detect urgency: if the user says "urgent", "jaldi", "zaroori", "abhi", \
+       "foran", "fauri", "immediate", or similar urgency words, set "priority" \
+       to "high". Otherwise set "priority" to "normal".
 
    (h) reduce_udhaar — customer PAID BACK / settled part of an existing credit:
        Trigger when the user wants an amount SUBTRACTED from a customer's \
@@ -216,7 +221,9 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
 "amount" (number — the amount to SUBTRACT), "description" (string)
 
    add_task:
-     "title" (string), "description" (string)
+     "title" (string), "description" (string), \
+     "priority" (one of "low", "normal", "high"; default "normal", use "high" \
+     for urgent/jaldi/zaroori/abhi/foran phrasings)
 
    navigate:
      "target_tab" (one of "inventory", "tasks", "udhaar")
@@ -231,6 +238,7 @@ Return ONLY a single JSON object (no markdown, no explanation) with these rules:
    - category defaults to "General"
    - prices default to 0 if not mentioned
    - direction defaults to "outgoing"
+   - task priority defaults to "normal"
 
 6. Respond in English for field values even if the transcript is in Urdu. \
    Transliterate Urdu names into English script.
@@ -308,7 +316,16 @@ Transcript: "what's the price of Dalda oil"
 Transcript: "kaunse item ka stock kam hai"
 {"action":"query_low_stock"}
 
+Transcript: "kaunse item ka low stock hai"
+{"action":"query_low_stock"}
+
 Transcript: "kitne items low stock mein hain"
+{"action":"query_low_stock"}
+
+Transcript: "low stock items batao"
+{"action":"query_low_stock"}
+
+Transcript: "stock kam hai kaunse item ka"
 {"action":"query_low_stock"}
 
 Transcript: "kaun si cheez kam hai"
@@ -412,34 +429,43 @@ Transcript: "doodh 6 litre include kar lo"
 === add_task (reminder/to-do, even if it mentions a product) ===
 
 Transcript: "chini restock karne ka task banao"
-{"action":"add_task","title":"Restock sugar","description":"Voice reminder"}
+{"action":"add_task","title":"Restock sugar","description":"Voice reminder","priority":"normal"}
 
 Transcript: "kal subah 9 baje dukaan kholna hai"
-{"action":"add_task","title":"Open shop at 9 AM","description":"Voice reminder"}
+{"action":"add_task","title":"Open shop at 9 AM","description":"Voice reminder","priority":"normal"}
 
 Transcript: "shaam ko supplier ko call karna yaad dilao"
-{"action":"add_task","title":"Call supplier in the evening","description":"Voice reminder"}
+{"action":"add_task","title":"Call supplier in the evening","description":"Voice reminder","priority":"normal"}
 
 Transcript: "har hafte stock check karna hai"
-{"action":"add_task","title":"Weekly stock check","description":"Voice reminder"}
+{"action":"add_task","title":"Weekly stock check","description":"Voice reminder","priority":"normal"}
 
 Transcript: "roz shaam 6 baje hisab band karna hai"
-{"action":"add_task","title":"Close accounts daily at 6 PM","description":"Voice reminder"}
+{"action":"add_task","title":"Close accounts daily at 6 PM","description":"Voice reminder","priority":"normal"}
 
 Transcript: "pehli tareekh ko rent dena yaad rakhna"
-{"action":"add_task","title":"Pay rent on the 1st","description":"Voice reminder"}
+{"action":"add_task","title":"Pay rent on the 1st","description":"Voice reminder","priority":"normal"}
 
 Transcript: "agley hafte naya order place karna"
-{"action":"add_task","title":"Place new order next week","description":"Voice reminder"}
+{"action":"add_task","title":"Place new order next week","description":"Voice reminder","priority":"normal"}
 
 Transcript: "reminder set karo bill pay karne ka"
-{"action":"add_task","title":"Pay the bill","description":"Voice reminder"}
+{"action":"add_task","title":"Pay the bill","description":"Voice reminder","priority":"normal"}
 
 Transcript: "note kar lo customer ko discount dena hai"
-{"action":"add_task","title":"Give discount to customer","description":"Voice reminder"}
+{"action":"add_task","title":"Give discount to customer","description":"Voice reminder","priority":"normal"}
 
 Transcript: "tomorrow morning call the wholesaler"
-{"action":"add_task","title":"Call the wholesaler tomorrow morning","description":"Voice reminder"}
+{"action":"add_task","title":"Call the wholesaler tomorrow morning","description":"Voice reminder","priority":"normal"}
+
+Transcript: "urgent kaam hai, subah 9 baje uthna hai"
+{"action":"add_task","title":"Urgent: wake up at 9 AM","description":"Voice reminder","priority":"high"}
+
+Transcript: "jaldi karna hai, abhi call karna hai Ahmad ko"
+{"action":"add_task","title":"Call Ahmad urgently now","description":"Voice reminder","priority":"high"}
+
+Transcript: "zaroori kaam hai, foran supplier se baat karo"
+{"action":"add_task","title":"Urgent: talk to supplier immediately","description":"Voice reminder","priority":"high"}
 
 === navigate (open/show a tab, no creation or query) ===
 
@@ -655,13 +681,19 @@ def _keyword_fallback(transcript: str) -> dict:
     task_words = {
         "task", "tasks", "reminder", "reminders", "yaad", "schedule",
         "banao", "subah", "shaam", "sham", "baje", "kal", "hafte",
-        "roz", "daily", "weekly",
+        "roz", "daily", "weekly", "kaam",
     }
     if any(p in t for p in task_phrases) or (task_words & tok_set):
+        urgency_words = {
+            "urgent", "jaldi", "zaroori", "zaroory", "abhi", "foran",
+            "fauri", "immediate", "immediately", "asap",
+        }
+        priority = "high" if (urgency_words & tok_set) else "normal"
         return {
             "action": "add_task",
             "title": transcript[:60],
             "description": "Voice reminder",
+            "priority": priority,
         }
 
     # Reduce udhaar — customer paid back / settled part of an existing credit.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:khata_app/models/udhaar_entry.dart';
 import 'package:khata_app/providers/app_state.dart';
+import 'package:khata_app/theme/app_theme.dart';
 import 'package:khata_app/widgets/date_time_picker_field.dart';
 import 'package:provider/provider.dart';
 
@@ -70,6 +71,34 @@ class _EditUdhaarDialogState extends State<EditUdhaarDialog> {
     Navigator.of(context).pop();
   }
 
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Udhaar Entry'),
+        content: const Text(
+          'Are you sure you want to delete this udhaar entry?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      context.read<AppState>().removeUdhaar(widget.entry.id);
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('d MMM, h:mm a');
@@ -130,6 +159,11 @@ class _EditUdhaarDialogState extends State<EditUdhaarDialog> {
         ),
       ),
       actions: [
+        TextButton(
+          onPressed: _delete,
+          style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+          child: const Text('Delete'),
+        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),

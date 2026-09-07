@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:khata_app/models/inventory_item.dart';
 import 'package:khata_app/providers/app_state.dart';
+import 'package:khata_app/theme/app_theme.dart';
 import 'package:khata_app/widgets/date_time_picker_field.dart';
 import 'package:provider/provider.dart';
 
@@ -88,6 +89,34 @@ class _EditInventoryDialogState extends State<EditInventoryDialog> {
     Navigator.of(context).pop();
   }
 
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Inventory Item'),
+        content: const Text(
+          'Are you sure you want to delete this inventory item?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      context.read<AppState>().removeInventoryItem(widget.item.id);
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('d MMM, h:mm a');
@@ -144,6 +173,11 @@ class _EditInventoryDialogState extends State<EditInventoryDialog> {
         ),
       ),
       actions: [
+        TextButton(
+          onPressed: _delete,
+          style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+          child: const Text('Delete'),
+        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
